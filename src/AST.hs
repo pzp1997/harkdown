@@ -10,7 +10,7 @@ data Markdown
   | OrderedList [Markdown]
   | UnorderedList [Markdown]
   | Text String
-  | BlockQuote Markdown
+  | BlockQuote [Markdown]
   | BlockLiteral String
   | InlineLiteral String
   | HorizontalRule

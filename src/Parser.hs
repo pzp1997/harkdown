@@ -1,50 +1,50 @@
 module Parser where
 
 import Control.Applicative
+import Prelude hiding (words)
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
 
 import AST
+import ParserCombinators
 
 type MdParser = Parser Markdown
 
+-- parseBlock :: MdParser
+-- parseBlock =
 
--- atLeast :: Int -> Parser a -> Parser [a]
--- atLeast n p
---   | n > 0     = liftA2 (:) p $ atLeast (n - 1) p
---   | otherwise = many p
---
--- atMost :: Show a => Int -> Parser a -> Parser [a]
--- atMost n p = helper n <* notFollowedBy p
---   where helper n
---           | n > 0     = liftA2 (:) p (helper $ n - 1) <|> return []
---           | otherwise = return []
+parseInline :: String -> MdParser
+parseInline = return . Text
 
-atLeast_ :: Int -> Parser a -> Parser ()
-atLeast_ n p
-  | n > 0     = p >> atLeast_ (n - 1) p
-  | otherwise = skipMany p
-
-atMost_ :: Show a => Int -> Parser a -> Parser ()
-atMost_ n p = helper n <* notFollowedBy p
-  where helper n'
-          | n' > 0     = (p >> helper (n' - 1)) <|> return ()
-          | otherwise = return ()
-
+-- TODO is ' ' the only "space" character or any non newline whitespace?
 thematicBreak :: MdParser
-thematicBreak = atMost_ 3 sp
+thematicBreak = atMost_ 3 spaceChar
              *> choice (atLeast_ 3 . breakChar <$> "*-_")
              *> eol
              *> pure HorizontalRule
-  where sp = char ' ' -- TODO is this only space character or any non newline whitespace?
-        breakChar c = char c <* many sp
+  where breakChar c = char c <* many spaceChar
+
+atxHeading :: MdParser
+atxHeading = do atMost_ 3 $ char ' '
+                hLevel <- repeatBetween 1 6 $ char '#'
+                some $ () <$ spaceChar <|> () <$ eol
+                content <- words
+                inlineContent <- parseInline content
+                optional $ some spaceChar *> some (char '#') *> some spaceChar
+                return $ Header hLevel inlineContent
+
+spaceChar :: Parser Char
+spaceChar = char ' '
+
+words :: Parser String
+words = many $ noneOf "\n\r"
 
 line :: Parser String
-line = many (noneOf "\n\r") <* eol
+line = words <* eolf
 
 blankLine :: Parser String
-blankLine = many (oneOf " \t") <* eol
+blankLine = many (oneOf " \t") <* eolf
 
 backtickString :: Parser String
 backtickString = some $ char '`'
@@ -59,3 +59,6 @@ eol = try crlf
     <|> newline
     <|> char '\r'
     <?> "end of line"
+
+eolf :: Parser ()
+eolf = () <$ eol <|> eof
