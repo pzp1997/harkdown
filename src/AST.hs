@@ -14,4 +14,4 @@ data Markdown
   | BlockLiteral String
   | InlineLiteral String
   | HorizontalRule
-  deriving (Show)
+  deriving (Eq, Show)
