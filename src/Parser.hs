@@ -1,7 +1,9 @@
 module Parser where
 
 import Control.Applicative
-import Prelude hiding (words)
+import Control.Monad
+import Data.List (isPrefixOf)
+import Prelude hiding (words, lines)
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
@@ -26,7 +28,7 @@ thematicBreak = atMost_ 3 spaceChar
   where breakChar c = char c <* many spaceChar
 
 atxHeading :: MdParser
-atxHeading = do atMost_ 3 $ char ' '
+atxHeading = do atMost_ 3 spaceChar
                 hLevel <- repeatBetween 1 6 $ char '#'
                 some $ () <$ spaceChar <|> () <$ eol
                 content <- words
@@ -34,14 +36,27 @@ atxHeading = do atMost_ 3 $ char ' '
                 optional $ some spaceChar *> some (char '#') *> some spaceChar
                 return $ Header hLevel inlineContent
 
-spaceChar :: Parser Char
-spaceChar = char ' '
+fencedCode :: MdParser
+fencedCode = do indent <- atMost 3 spaceChar
+                let indentSize = length indent
+                openFence <- fence
+                infoString <- optionMaybe $ spacesAround $ some nonWhiteSpace
+                content <- manyTill (atMost indentSize spaceChar *> litLine) $
+                  eof <|> try (do closeFence <- fence
+                                  unless (openFence `isPrefixOf` closeFence) $
+                                    parserFail "closing code fence")
+                return $ BlockLiteral infoString $ concat content
+  where fence = choice $ atLeast 3 . char <$> "`~"
+        litLine = liftA2 (++) words eol
 
 words :: Parser String
 words = many $ noneOf "\n\r"
 
 line :: Parser String
 line = words <* eolf
+
+lines :: Parser [String]
+lines = endBy words eolf
 
 blankLine :: Parser String
 blankLine = many (oneOf " \t") <* eolf
@@ -54,11 +69,8 @@ backtickString = some $ char '`'
 --           let level = length start
 --           end <- backtickString
 
-eol :: Parser Char
-eol = try crlf
-    <|> newline
-    <|> char '\r'
-    <?> "end of line"
+eol :: Parser String
+eol = try (string "\r\n") <|> string "n" <|> string "\r" <?> "end of line"
 
 eolf :: Parser ()
 eolf = () <$ eol <|> eof

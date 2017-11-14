@@ -11,7 +11,7 @@ data Markdown
   | UnorderedList [Markdown]
   | Text String
   | BlockQuote [Markdown]
-  | BlockLiteral String
+  | BlockLiteral (Maybe String) String
   | InlineLiteral String
   | HorizontalRule
   deriving (Eq, Show)
