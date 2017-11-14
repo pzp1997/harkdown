@@ -1,8 +1,9 @@
 module ParserCombinators where
 
 import Control.Applicative
+import Data.Char (isSpace)
 
-import Text.Parsec (skipMany)
+import Text.Parsec (satisfy, char, skipMany, between)
 import Text.Parsec.String (Parser)
 
 atLeast :: Int -> Parser a -> Parser [a]
@@ -31,3 +32,16 @@ repeatBetween lo hi p = helper 0
           | n < lo    = p *> helper (n + 1)
           | n <= hi   = (p *> helper (n + 1)) <|> return n
           | otherwise = fail "too many"
+
+spaceChar :: Parser Char
+spaceChar = char ' ' -- might include tabs for code blocks?
+
+nonWhiteSpace :: Parser Char
+nonWhiteSpace = satisfy $ not . isSpace
+
+
+spacesAround :: Parser a -> Parser a
+spacesAround = between (many spaceChar) (many spaceChar)
+
+-- manyTill :: Parser a -> Parser b -> Parser [a]
+-- manyTill p end = (try end *> return []) <|> liftA2 (:) p manyTill
