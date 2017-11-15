@@ -69,8 +69,10 @@ backtickString = some $ char '`'
 --           let level = length start
 --           end <- backtickString
 
-eol :: Parser String
-eol = try (string "\r\n") <|> string "n" <|> string "\r" <?> "end of line"
+eol' :: Parser String
+eol' =   string "\n"
+     <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
+     <?> "end of line"
 
 eolf :: Parser ()
 eolf = () <$ eol <|> eof
