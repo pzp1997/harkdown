@@ -73,8 +73,8 @@ backtickString = some $ char '`'
 
 eol :: Parser String
 eol =   string "\n"
-     <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
-     <?> "end of line"
+    <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
+    <?> "end of line"
 
 eolf :: Parser ()
 eolf = () <$ eol <|> eof
