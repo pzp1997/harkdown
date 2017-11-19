@@ -15,6 +15,8 @@ type MdParser = Parser Markdown
 
 -- parseBlock :: MdParser
 -- parseBlock =
+parseMarkdown :: String -> [Markdown]
+parseMarkdown = undefined
 
 parseInline :: String -> MdParser
 parseInline = return . Text
