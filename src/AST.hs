@@ -1,4 +1,6 @@
-module AST (Markdown(..)) where
+module AST where
+
+type MdDoc = [Markdown]
 
 data Markdown
   = Bold Markdown
