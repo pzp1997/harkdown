@@ -3,8 +3,12 @@ module HtmlFormatter where
 import Text.PrettyPrint
 
 import AST
+import Parser (parseMarkdown)
 
 type Attributes = [(String, String)]
+
+markdownToHtml :: String -> String
+markdownToHtml = renderHtml . parseMarkdown
 
 renderHtml :: [Markdown] -> String
 renderHtml = render . foldMap htmlify

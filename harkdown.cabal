@@ -4,7 +4,7 @@ synopsis: A CommonMark compliant Markdown parser written in Haskell using Parsec
 -- description:
 license:             AllRightsReserved
 license-file:        LICENSE
-author:              Palmer Paul
+author:              Palmer Paul, Jeremy Lautman
 maintainer:          pzpaul2002@yahoo.com
 -- copyright:
 -- category:
@@ -22,8 +22,8 @@ executable harkdown
 test-suite spec
   ghc-options:         -Wall
   type: exitcode-stdio-1.0
-  main-is:             Main.hs
-  build-depends:       base >=4.10 && <4.11, parsec >=3.1 && <3.2, HUnit >=1.6 && <1.7
+  main-is:             Test.hs
+  build-depends:       base >=4.10 && <4.11, parsec >=3.1 && <3.2, pretty >=1.1 && <1.2, HUnit >=1.6 && <1.7, aeson >=1.2 && <1.3, bytestring >=0.10 && <0.11, text >=1.2 && <1.3 
   hs-source-dirs:      test, src
-  other-modules:       AST, HorizontalRule, Parser, ParserCombinators
+  other-modules:       AST, HorizontalRule, Parser, ParserCombinators, HtmlFormatter, SpecTests
   default-language:    Haskell98
