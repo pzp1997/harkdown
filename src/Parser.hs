@@ -31,12 +31,12 @@ thematicBreak = atMost_ 3 spaceChar
 
 atxHeading :: MdParser
 atxHeading = do atMost_ 3 spaceChar
-                hLevel <- repeatBetween 1 6 $ char '#'
-                some $ () <$ spaceChar <|> () <$ eol
-                content <- words
+                hLevel <- repeatBetween 1 6 hashtagChar
+                content <- some spaceChar *> manyTill (noneOf "\n\r")
+                  (try $ spacesAround (many hashtagChar) *> eol) <|> "" <$ eol
                 inlineContent <- parseInline content
-                optional $ some spaceChar *> some (char '#') *> some spaceChar
                 return $ Header hLevel inlineContent
+  where hashtagChar = char '#'
 
 fencedCode :: MdParser
 fencedCode = do indent <- atMost 3 spaceChar
