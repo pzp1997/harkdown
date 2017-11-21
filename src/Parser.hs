@@ -51,6 +51,11 @@ fencedCode = do indent <- atMost 3 spaceChar
   where fence = choice $ atLeast 3 . char <$> "`~"
         litLine = liftA2 (++) words eol
 
+blockquote :: MdParser
+blockquote = BlockQuote <$> some $ atMost_ 3 spaceChar *> char '>' *>
+                            optional (char ' ') *> parseBlock
+
+
 words :: Parser String
 words = many $ noneOf "\n\r"
 
