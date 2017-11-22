@@ -11,7 +11,11 @@ import Text.Parsec.String (Parser)
 import AST
 import ParserCombinators
 
+-- Temporarily imported for first pass testing
+--import Test.HUnit
+
 type MdParser = Parser Markdown
+type BlParser = Parser Blocklevels
 
 -- parseBlock :: MdParser
 -- parseBlock =
@@ -22,11 +26,11 @@ parseInline :: String -> MdParser
 parseInline = return . Text
 
 -- TODO is ' ' the only "space" character or any non newline whitespace?
-thematicBreak :: MdParser
+thematicBreak :: BlParser -- Note: all thematic breaks are parsed during the first pass
 thematicBreak = atMost_ 3 spaceChar
              *> choice (atLeast_ 3 . breakChar <$> "*-_")
              *> eol
-             *> pure HorizontalRule
+             *> pure BThematic
   where breakChar c = char c <* many spaceChar
 
 atxHeading :: MdParser
@@ -78,3 +82,50 @@ eol =   string "\n"
 
 eolf :: Parser ()
 eolf = () <$ eol <|> eof
+
+
+bblockquoteP :: BlParser
+bblockquoteP = undefined
+
+blistP :: BlParser
+blistP = undefined
+
+bheader :: BlParser
+bheader = undefined
+
+bcodeblock :: BlParser
+bcodeblock = undefined
+
+bhtmlblock :: BlParser
+bhtmlblock = undefined
+
+bparagraph :: BlParser
+bparagraph = undefined
+
+blink :: BlParser
+blink = undefined
+
+-- | AST for the first pass parsing.
+data BlockLevelUList
+  = BUListItem String
+  deriving (Eq, Show)
+data BlockLevelOList
+  = BOListItem String
+  deriving (Eq, Show)
+
+data BlockLevels
+  = BBlockQuote String
+  -- List of either ordered or unordered items
+  | BList (Either [BlockLevelUList] [BlockLevelOList])
+  -- a header. Includes a integer level (1 - 6)
+  | BHeader Int String
+  | BThematic
+  | BCodeBlock String
+  | BHtmlBlock String
+  | BParagraph String
+  -- A link with a tag and link text
+  | BLink String String
+  deriving (Eq, Show)
+
+firstPass :: Parser BlockLevels
+firstPass = undefined
