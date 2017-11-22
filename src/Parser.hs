@@ -11,6 +11,9 @@ import Text.Parsec.String (Parser)
 import AST
 import ParserCombinators
 
+-- Temporarily imported for first pass testing
+--import Test.HUnit
+
 type MdParser = Parser Markdown
 
 -- parseBlock :: MdParser
@@ -90,7 +93,16 @@ bheader :: Parser BlockLevels
 bheader = undefined
 
 bthematic :: Parser BlockLevels
-bthematic = undefined
+bthematic = do
+  atMost_ 3 spaceChar
+  choice [atLeast_ 3 $ char '-', atLeast_ 3 $ char '*', atLeast_ 3 $ char '_']
+  return BThematic
+
+--tBthematic :: Test
+--tBthematic = TestList
+--  [ regularParse bthematic "***" ~?= Right BThematic
+--  , regularParse bthematic "******* " ~?= Right BThematic
+--  ]
 
 bcodeblock :: Parser BlockLevels
 bcodeblock = undefined
@@ -105,21 +117,26 @@ blink :: Parser BlockLevels
 blink = undefined
 
 -- | AST for the first pass parsing.
-data BlockLevels =
-  BBlockQuote String
-  -- List of either ordered or unordered items
-  BList (Either [BUListItem] [BOListItem])
-  -- Unordered list item
-  BUListItem String
-  -- Ordered list item
-  BOListItem String
-  -- a header. Includes a integer level (1 - 6)
-  BHeader Int String
-  BThematic String
-  BCodeBlock String
-  BHtmlBlock String
-  BParagraph String
-  -- A link with a tag and link text
-  BLink String String
+data BlockLevelUList
+  = BUListItem String
+  deriving (Eq, Show)
+data BlockLevelOList
+  = BOListItem String
   deriving (Eq, Show)
 
+data BlockLevels
+  = BBlockQuote String
+  -- List of either ordered or unordered items
+  | BList (Either [BlockLevelUList] [BlockLevelOList])
+  -- a header. Includes a integer level (1 - 6)
+  | BHeader Int String
+  | BThematic
+  | BCodeBlock String
+  | BHtmlBlock String
+  | BParagraph String
+  -- A link with a tag and link text
+  | BLink String String
+  deriving (Eq, Show)
+
+firstPass :: Parser BlockLevels
+firstPass = undefined
