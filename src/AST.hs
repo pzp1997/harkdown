@@ -10,8 +10,8 @@ data Markdown
   | OrderedList [Markdown]
   | UnorderedList [Markdown]
   | Text String
-  | BlockQuote [Markdown]
-  | BlockLiteral (Maybe String) String
-  | InlineLiteral String
+  | BlockQuote Markdown
+  | CodeBlock (Maybe String) String
+  | Code String
   | HorizontalRule
   deriving (Eq, Show)
