@@ -78,3 +78,21 @@ eol =   string "\n"
 
 eolf :: Parser ()
 eolf = () <$ eol <|> eof
+
+data BlockLevels =
+  BBlockQuote String
+  -- List of either ordered or unordered items
+  BList (Either [BUListItem] [BOListItem])
+  -- Unordered list item
+  BUListItem String
+  -- Ordered list item
+  BOListItem String
+  -- a header. Includes a integer level (1 - 6)
+  BHeader Int String
+  BThematic String
+  BCodeBlock String
+  BHtmlBlock String
+  BParagraph String
+  -- A link with a tag and link text
+  BLink String String
+  deriving (Eq, Show)
