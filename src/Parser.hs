@@ -11,27 +11,29 @@ import Text.Parsec.String (Parser)
 import AST
 import ParserCombinators
 
-type MdParser = Parser Markdown
+--------------------------------  BIG PARSERS  --------------------------------
 
--- parseBlock :: MdParser
--- parseBlock =
 parseMarkdown :: String -> [Markdown]
 parseMarkdown input = case parse (many atxHeading) "" input of
                         Left  _  -> []
                         Right md -> md
 
-parseInline :: String -> MdParser
+parseBlock :: String -> [Partial]
+parseBlock = undefined
+
+parseInline :: [Partial] -> [Markdown]
 parseInline = return . Text
 
--- TODO is ' ' the only "space" character or any non newline whitespace?
-thematicBreak :: MdParser
-thematicBreak = atMost_ 3 spaceChar
-             *> choice (atLeast_ 3 . breakChar <$> "*-_")
-             *> eol
-             *> pure HorizontalRule
+----------------------------  BLOCK LEVEL PARSERS  ----------------------------
+
+thematicBreak :: Parser Markdown
+thematicBreak =  atMost_ 3 spaceChar
+              *> choice (atLeast_ 3 . breakChar <$> "*-_")
+              *> eol
+              *> pure HorizontalRule
   where breakChar c = char c <* many spaceChar
 
-atxHeading :: MdParser
+atxHeading :: Parser Markdown
 atxHeading = do atMost_ 3 spaceChar
                 hLevel <- repeatBetween 1 6 hashtagChar
                 content <- some spaceChar *> manyTill (noneOf "\n\r")
@@ -40,7 +42,7 @@ atxHeading = do atMost_ 3 spaceChar
                 return $ Header hLevel inlineContent
   where hashtagChar = char '#'
 
-fencedCode :: MdParser
+fencedCode :: Parser Markdown
 fencedCode = do indent <- atMost 3 spaceChar
                 let indentSize = length indent
                 openFence <- fence
@@ -53,15 +55,34 @@ fencedCode = do indent <- atMost 3 spaceChar
   where fence = choice $ atLeast 3 . char <$> "`~"
         litLine = liftA2 (++) words eol
 
-blockquote :: MdParser
+blockquote :: Parser Markdown
 blockquote = BlockQuote <$> some $ atMost_ 3 spaceChar *> char '>' *>
                             optional (char ' ') *> parseBlock
+
+
+----------------------------  INLINE LEVEL PARSERS  ---------------------------
+
+
+-------------------------------  HELPER PARSERS  ------------------------------
+
+backtickString :: Parser String
+backtickString = some $ char '`'
 
 orderedListMarker :: Parser String
 orderedListMarker = repeatBetween 1 9 (satisfies isDigit) <* choice ".)"
 
 unorderedListMarker :: Parser Char
 unorderedListMarker = choice "-+*"
+
+----------------------------  DEFINITIONAL PARSERS  ---------------------------
+
+eol :: Parser String
+eol =   string "\n"
+    <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
+    <?> "end of line"
+
+eolf :: Parser ()
+eolf = () <$ eol <|> eof
 
 words :: Parser String
 words = many $ noneOf "\n\r"
@@ -74,19 +95,3 @@ lines = endBy words eolf
 
 blankLine :: Parser String
 blankLine = many (oneOf " \t") <* eolf
-
-backtickString :: Parser String
-backtickString = some $ char '`'
-
--- code :: Parser String
--- code = do start <- backtickString
---           let level = length start
---           end <- backtickString
-
-eol :: Parser String
-eol =   string "\n"
-    <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
-    <?> "end of line"
-
-eolf :: Parser ()
-eolf = () <$ eol <|> eof
