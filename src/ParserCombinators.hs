@@ -26,19 +26,26 @@ atMost_ n p
   | n >= 0    = (p *> atMost_ (n - 1) p) <|> return ()
   | otherwise = fail "too many"
 
-repeatBetween :: Int -> Int -> Parser a -> Parser Int
-repeatBetween lo hi p = helper 0
+repeatBetweenN :: Int -> Int -> Parser a -> Parser Int
+repeatBetweenN lo hi p = helper 0
   where helper n
           | n < lo    = p *> helper (n + 1)
           | n <= hi   = (p *> helper (n + 1)) <|> return n
           | otherwise = fail "too many"
+
+repeatBetween :: Int -> Int -> Parser a -> Parser [a]
+repeatBetween lo hi p = helper 0
+  where helper n
+          | n < lo    = consP n
+          | n <= hi   = consP n <|> return []
+          | otherwise = fail "too many"
+        consP n = liftA2 (:) p (helper $ n + 1)
 
 spaceChar :: Parser Char
 spaceChar = char ' ' -- might include tabs for code blocks?
 
 nonWhiteSpace :: Parser Char
 nonWhiteSpace = satisfy $ not . isSpace
-
 
 spacesAround :: Parser a -> Parser a
 spacesAround = between (many spaceChar) (many spaceChar)

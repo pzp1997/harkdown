@@ -1,4 +1,4 @@
-module AST (Markdown(..)) where
+module AST where
 
 data Markdown
   = Bold Markdown
@@ -10,7 +10,7 @@ data Markdown
   | OrderedList [Markdown]
   | UnorderedList [Markdown]
   | Text String
-  | BlockQuote Markdown
+  | BlockQuote [Markdown]
   | CodeBlock (Maybe String) String
   | Code String
   | HorizontalRule
@@ -18,11 +18,10 @@ data Markdown
 
 data Partial
   = PHeader Int String
-  | PParagraph String
   | POrderedList [String]
   | PUnorderedList [String]
-  | PBlockQuote String
-  | PCodeBlock String
+  | PBlockQuote [String]
+  | PCodeBlock (Maybe String) String
   | PHorizontalRule
-  | PLinkRef String String
+  | PParagraph String
   deriving (Eq, Show)
