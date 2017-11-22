@@ -15,3 +15,14 @@ data Markdown
   | Code String
   | HorizontalRule
   deriving (Eq, Show)
+
+data Partial
+  = PHeader Int String
+  | PParagraph String
+  | POrderedList [String]
+  | PUnorderedList [String]
+  | PBlockQuote String
+  | PCodeBlock String
+  | PHorizontalRule
+  | PLinkRef String String
+  deriving (Eq, Show)
