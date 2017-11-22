@@ -55,6 +55,11 @@ blockquote :: MdParser
 blockquote = BlockQuote <$> some $ atMost_ 3 spaceChar *> char '>' *>
                             optional (char ' ') *> parseBlock
 
+orderedListMarker :: Parser String
+orderedListMarker = repeatBetween 1 9 (satisfies isDigit) <* choice ".)"
+
+unorderedListMarker :: Parser Char
+unorderedListMarker = choice "-+*"
 
 words :: Parser String
 words = many $ noneOf "\n\r"
