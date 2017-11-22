@@ -104,6 +104,7 @@ bparagraph = undefined
 blink :: Parser BlockLevels
 blink = undefined
 
+-- | AST for the first pass parsing.
 data BlockLevels =
   BBlockQuote String
   -- List of either ordered or unordered items
