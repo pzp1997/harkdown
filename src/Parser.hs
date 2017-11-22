@@ -15,6 +15,7 @@ import ParserCombinators
 --import Test.HUnit
 
 type MdParser = Parser Markdown
+type BlParser = Parser Blocklevels
 
 -- parseBlock :: MdParser
 -- parseBlock =
@@ -25,11 +26,11 @@ parseInline :: String -> MdParser
 parseInline = return . Text
 
 -- TODO is ' ' the only "space" character or any non newline whitespace?
-thematicBreak :: MdParser
+thematicBreak :: BlParser -- Note: all thematic breaks are parsed during the first pass
 thematicBreak = atMost_ 3 spaceChar
              *> choice (atLeast_ 3 . breakChar <$> "*-_")
              *> eol
-             *> pure HorizontalRule
+             *> pure BThematic
   where breakChar c = char c <* many spaceChar
 
 atxHeading :: MdParser
@@ -83,37 +84,25 @@ eolf :: Parser ()
 eolf = () <$ eol <|> eof
 
 
-bblockquoteP :: Parser BlockLevels
+bblockquoteP :: BlParser
 bblockquoteP = undefined
 
-blistP :: Parser BlockLevels
+blistP :: BlParser
 blistP = undefined
 
-bheader :: Parser BlockLevels
+bheader :: BlParser
 bheader = undefined
 
-bthematic :: Parser BlockLevels
-bthematic = do
-  atMost_ 3 spaceChar
-  choice [atLeast_ 3 $ char '-', atLeast_ 3 $ char '*', atLeast_ 3 $ char '_']
-  return BThematic
-
---tBthematic :: Test
---tBthematic = TestList
---  [ regularParse bthematic "***" ~?= Right BThematic
---  , regularParse bthematic "******* " ~?= Right BThematic
---  ]
-
-bcodeblock :: Parser BlockLevels
+bcodeblock :: BlParser
 bcodeblock = undefined
 
-bhtmlblock :: Parser BlockLevels
+bhtmlblock :: BlParser
 bhtmlblock = undefined
 
-bparagraph :: Parser BlockLevels
+bparagraph :: BlParser
 bparagraph = undefined
 
-blink :: Parser BlockLevels
+blink :: BlParser
 blink = undefined
 
 -- | AST for the first pass parsing.
