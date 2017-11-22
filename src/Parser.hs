@@ -16,7 +16,9 @@ type MdParser = Parser Markdown
 -- parseBlock :: MdParser
 -- parseBlock =
 parseMarkdown :: String -> [Markdown]
-parseMarkdown = undefined
+parseMarkdown input = case parse (many atxHeading) "" input of
+                        Left  _  -> []
+                        Right md -> md
 
 parseInline :: String -> MdParser
 parseInline = return . Text
