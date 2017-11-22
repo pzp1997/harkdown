@@ -79,6 +79,31 @@ eol =   string "\n"
 eolf :: Parser ()
 eolf = () <$ eol <|> eof
 
+
+bblockquoteP :: Parser BlockLevels
+bblockquoteP = undefined
+
+blistP :: Parser BlockLevels
+blistP = undefined
+
+bheader :: Parser BlockLevels
+bheader = undefined
+
+bthematic :: Parser BlockLevels
+bthematic = undefined
+
+bcodeblock :: Parser BlockLevels
+bcodeblock = undefined
+
+bhtmlblock :: Parser BlockLevels
+bhtmlblock = undefined
+
+bparagraph :: Parser BlockLevels
+bparagraph = undefined
+
+blink :: Parser BlockLevels
+blink = undefined
+
 data BlockLevels =
   BBlockQuote String
   -- List of either ordered or unordered items
@@ -96,3 +121,4 @@ data BlockLevels =
   -- A link with a tag and link text
   BLink String String
   deriving (Eq, Show)
+
