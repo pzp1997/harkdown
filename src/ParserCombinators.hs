@@ -47,6 +47,7 @@ spacesAround = between (many spaceChar) (many spaceChar)
 -- manyTill :: Parser a -> Parser b -> Parser [a]
 -- manyTill p end = (try end *> return []) <|> liftA2 (:) p manyTill
 
+{-
 -- | Variant of manyTill that only succeeds if the first parser succeeds at
 --   least once.
 many1Till :: (Show a, Show b) => Parser a -> Parser b -> Parser[a]
@@ -55,3 +56,4 @@ many1Till p end = do
   aVal <- p
   rest <- manyTill p end
   return $ aVal : rest
+-}
