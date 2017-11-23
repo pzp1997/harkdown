@@ -38,17 +38,20 @@ inlineP = undefined
 
 type BlockLevel = Writer (Map String String) Partial
 
-thematicBreak, atxHeading, setextHeading :: Parser BlockLevel
-indentedCode, fencedCode, paragraph      :: Parser BlockLevel
-blockquote, orderedList, unorderedList   :: Parser BlockLevel
+emptyWriter :: Ord k => a -> Writer (Map k v) a
+emptyWriter = writer . (\p -> (p, Map.empty))
 
-thematicBreak =  atMost_ 3 spaceChar
+thematicBreak, atxHeading,      setextHeading     :: Parser BlockLevel
+indentedCode,  fencedCode,      paragraph         :: Parser BlockLevel
+blockquote,    orderedListItem, unorderedListItem :: Parser BlockLevel
+
+thematicBreak =  lineStart
               *> choice (atLeast_ 3 . breakChar <$> "*-_")
               *> eol
               *> pure (return PHorizontalRule)
   where breakChar c = char c <* many spaceChar
 
-atxHeading = do atMost_ 3 spaceChar
+atxHeading = do lineStart
                 hLevel <- repeatBetweenN 1 6 hashtagChar
                 content <- some spaceChar *> manyTill (noneOf "\n\r")
                   (try $ spacesAround (many hashtagChar) *> eol) <|> "" <$ eol
@@ -71,17 +74,24 @@ fencedCode = do indent <- atMost 3 spaceChar
   where fence = choice $ atLeast 3 . char <$> "`~"
         litLine = liftA2 (++) words eol
 
-paragraph = (writer . (\p -> (p, Map.empty)) . PParagraph) <$>
-              manyTill anyChar (try blankLine <|> eof')
+paragraph = (emptyWriter . PParagraph) <$> continuationText
 
-blockquote = pure $ PBlockQuote <$>
-  some (atMost_ 3 spaceChar *> char '>' *> optional (char ' ') *> blockP)
+blockquote = (emptyWriter . PBlockQuote) <$>
+  (lineStart *> blockquoteMarker *> blockquoteContinutation)
 
-orderedList = undefined
+orderedListItem = do n <- atMostN 3 spaceChar
+                     marker <- orderedListMarker
+                     m <- repeatBetweenN 1 4 spaceChar
+                     content <- listItemContent $ n + m + length marker
+                     return $ return $ POrderedList (read marker) content
 
-unorderedList = undefined
+unorderedListItem = do n <- atMostN 3 spaceChar
+                       unorderedListMarker
+                       m <- repeatBetweenN 1 4 spaceChar
+                       content <- listItemContent $ n + m
+                       return $ return $ PUnorderedList content
 
-linkRef :: Parser (String, String)
+linkRef :: Parser BlockLevel
 linkRef = undefined
 
 ----------------------------  INLINE LEVEL PARSERS  ---------------------------
@@ -106,6 +116,38 @@ orderedListMarker = repeatBetween 1 9 digit <* choice (char <$> ".)")
 
 unorderedListMarker :: Parser Char
 unorderedListMarker = choice $ char <$> "-+*"
+
+listMarker :: Parser ()
+listMarker = () <$ orderedListMarker <|> () <$ unorderedListMarker
+
+blockquoteMarker :: Parser ()
+blockquoteMarker = char '>' *> optional (char ' ') *> return ()
+
+setextMarker :: Parser Int
+setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eolf
+
+continuationText :: Parser String
+continuationText = manyTill anyChar $ try (eol *> blankLine) <|> eof'
+
+containerParser :: Parser a -> Parser String
+containerParser marker = manyTill anyChar $
+  try (eol *> (() <$ blankLine) <|> (() <$ lookAhead marker)) <|> eof
+
+-- TODO this should actually stop parsing whenever ANY block level marker
+-- that is indented less than w spaces is found. Can be re-used for blockquote
+-- with the special case of w = 4.
+listItemContent :: Int -> Parser String
+listItemContent w = manyTill anyChar $
+  try (eol *> lookAhead (atMost_ w spaceChar <* listMarker) <|> (() <$ lookAhead blankLine)) <|> eof
+
+blockquoteContinutation :: Parser String
+blockquoteContinutation = containerParser blockquoteMarker
+
+orderedListContinutation :: Parser String
+orderedListContinutation = containerParser orderedListMarker
+
+lineStart :: Parser ()
+lineStart = atMost_ 3 spaceChar
 
 ----------------------------  DEFINITIONAL PARSERS  ---------------------------
 

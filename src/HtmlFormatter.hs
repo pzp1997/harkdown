@@ -31,6 +31,8 @@ htmlify (BlockLiteral info s) = tag "pre" [] $ tag "code" codeAttr $ text s
                      Nothing         -> []
 htmlify (InlineLiteral s)     = tag "code" [] $ text s
 htmlify HorizontalRule        = selfClosingTag "hr" []
+htmlify SoftBreak             = char '\n'
+htmlify HardBreak             = selfClosingTag "br" []
 
 tag :: String -> Attributes -> Doc -> Doc
 tag tagName attr contents = text ("<" ++ tagName ++ strOfAttr attr ++ ">") <>

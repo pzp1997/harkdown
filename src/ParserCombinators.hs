@@ -11,15 +11,18 @@ atLeast n p
   | n > 0     = liftA2 (:) p $ atLeast (n - 1) p
   | otherwise = many p
 
+atLeast_ :: Int -> Parser a -> Parser ()
+atLeast_ n p
+  | n > 0     = p *> atLeast_ (n - 1) p
+  | otherwise = skipMany p
+
 atMost :: Int -> Parser a -> Parser [a]
 atMost n p
   | n >= 0    = liftA2 (:) p (atMost (n - 1) p) <|> return []
   | otherwise = fail "too many"
 
-atLeast_ :: Int -> Parser a -> Parser ()
-atLeast_ n p
-  | n > 0     = p *> atLeast_ (n - 1) p
-  | otherwise = skipMany p
+atMostN :: Int -> Parser a -> Parser Int
+atMostN n = fmap length . atMost n
 
 atMost_ :: Int -> Parser a -> Parser ()
 atMost_ n p
