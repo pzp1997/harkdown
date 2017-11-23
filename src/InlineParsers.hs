@@ -1,3 +1,5 @@
+{-# LANGUAGE InstanceSigs #-}
+
 -- | Module to parse blocks of text into the Markdown AST.
 module InlineParser (buildAST) where
 
@@ -7,6 +9,8 @@ import Control.Monad
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
+
+import Data.Maybe (listToMaybe)
 
 import AST
 import ParserCombinators
@@ -62,11 +66,54 @@ punctuation = try $ oneOf punctuationchars
 punctuationchars :: String
 punctuationchars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
--- | Create a Markdown AST from the input string
+-- Set up a parallel parser over the list so that it can be consumed
+-- applicatively
+
+newtype TokenParser a = P { doParse :: [MdToken] -> [(a, [MdToken])] }
+
+instance Functor TokenParser where
+  fmap :: (a -> b) -> TokenParser a -> TokenParser b
+  fmap = liftA
+
+instance Applicative TokenParser where
+  pure x    = P $ \tokens -> [(x, tokens)]
+  p1 <*> p2 = P $ \ s -> do {
+    (f, s')  <- doParse p1 s;
+    (x, s'') <- doParse p2 s';
+    return (f x, s'')}
+
+instance Monad TokenParser where
+  return  = pure
+  (>>=)  :: TokenParser a -> (a -> TokenParser b) -> TokenParser b
+  x >>= f = P $ \tokens -> do
+    (a, tokens')  <- doParse x tokens
+    doParse (f a) tokens'
+
+-- | Top level token parser for any kind of Markdown
+inlineMarkdown :: TokenParser Markdown
+inlineMarkdown = undefined
+
+-- | Consumes an emphasis block, and generates a Bold Markdown block. As the
+--   contents of the block is itself a Markdown tree, the 
+emphasisBlock :: TokenParser Markdown
+emphasisBlock = undefined
+
+-- | Consumes an html pre, script, or style block and consumes all tokens until
+--   it reaches its associated close tag. It then uses that to generate a Text
+--   Markdown leaf.
+preBlock :: TokenParser Markdown
+preBlock = undefined
+
+-- | Create a Markdown AST from the input string. Errors if the string can't be
+--   fully consumed to create valid Markdown.
 buildAST :: String -> Markdown
 buildAST s = case tokenize s of
   Left err     -> error "Invalid markdown"
-  Right tokens -> undefined
+  Right tokens -> case listToMaybe $ dropNotFullyConsumed (doParse inlineMarkdown tokens) of
+    Nothing     -> error "Invalid markdown"
+    Just (a, _) -> a
+  where
+      dropNotFullyConsumed = dropWhile (\(_, l) -> not $ null l)
 
 {-
 -- | Tests if the next data to consume is a sequence of the provided character
