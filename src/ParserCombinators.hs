@@ -55,3 +55,8 @@ spacesAround = between (many spaceChar) (many spaceChar)
 
 -- manyTill :: Parser a -> Parser b -> Parser [a]
 -- manyTill p end = (try end *> return []) <|> liftA2 (:) p manyTill
+
+
+manyTillEnd :: Parser a -> Parser [a] -> Parser [a]
+manyTillEnd p end = scan
+  where scan = end <|> liftA2 (:) p scan

@@ -7,7 +7,7 @@ import Data.Char (isSpace)
 import Data.List (isPrefixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Prelude hiding (words, lines)
+import Data.Maybe (fromMaybe)
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
@@ -21,13 +21,23 @@ import ParserCombinators
 
 --------------------------------  BIG PARSERS  --------------------------------
 
-markdownP :: Parser [Markdown]
-markdownP = do writer <- blockP
-               let (partialAst, linkRefs) = runWriter writer
-               return []
+-- markdownP :: Parser [Markdown]
+-- markdownP = do writer <- blockP
+--                let (partialAst, linkRefs) = runWriter writer
+--                return []
 
-blockP :: Parser BlockLevel
-blockP = undefined
+-- once we have list of partials, need to go through and group runs of
+-- blockquotes, list items.
+
+blockP :: Parser [Partial]
+blockP = many $ choice $ try <$> [ thematicBreak
+                          -- , unorderedListItem
+                          -- , orderedListItem
+                          -- , blockquote
+                          -- , atxHeading
+                          -- , fencedCode
+                          , paragraph
+                          ]
 
 inlineP :: Parser Markdown
 inlineP = undefined
@@ -47,7 +57,7 @@ thematicBreak, atxHeading,      setextHeading     :: Parser Partial
 indentedCode,  fencedCode,      paragraph         :: Parser Partial
 blockquote,    orderedListItem, unorderedListItem :: Parser Partial
 
-thematicBreak = lineStart *> thematicMarker *> eol *> pure PHorizontalRule
+thematicBreak = lineStart *> thematicMarker *> eolf *> pure PHorizontalRule
 
 atxHeading = do lineStart
                 hLevel <- atxMarker
@@ -65,16 +75,15 @@ indentedCode = undefined
 fencedCode = do indentSize <- lineStartN
                 openFence <- fenceMarker
                 infoString <- optionMaybe $ spacesAround (some nonWhiteSpace)
-                content <- manyTill (atMost indentSize spaceChar *> litLine) $
+                content <- manyTill (atMost indentSize spaceChar *> line) $
                   choice [ try (do closeFence <- fenceMarker
                                    unless (openFence `isPrefixOf` closeFence) $
                                      parserFail "closing code fence")
                          , eof
                          ]
                 return $ PCodeBlock infoString $ concat content
-  where litLine = liftA2 (++) words eol
 
-paragraph = PParagraph <$> paragraphContent
+paragraph = PParagraph <$> (lineStart *> paragraphContent)
 
 blockquote = PBlockQuote <$> (lineStart *> blockquoteMarker *> blockquoteContent)
 
@@ -145,7 +154,14 @@ backtickString :: Parser String
 backtickString = some $ char '`'
 
 paragraphContent :: Parser String
-paragraphContent = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
+-- paragraphContent = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
+paragraphContent = do
+  rawLine <- manyTill anyChar $ lookAhead eolf
+  let line = trim rawLine
+  if line == "" then return ""
+  else do nl <- eolf
+          rest <- paragraphContent
+          return $ concat [line, nl, rest]
 
 -- containerParser :: Parser a -> Parser String
 -- containerParser marker = manyTill anyChar $
@@ -162,10 +178,14 @@ container blank w = manyTill anyChar $
   <|> eof
 
 listItemContent :: Int -> Parser String
-listItemContent = container $ blankLine_ *> blankLine_
+listItemContent = container $ blankLine *> blankLine -- TODO this is wrong
 
 blockquoteContent :: Parser String
-blockquoteContent = container blankLine_ 3
+blockquoteContent = manyTill anyChar $
+  try (eol *> lookAhead
+                ((atMost_ 3 spaceChar <* interruptMarkers)
+                 <|> blankLine))
+  <|> eof
 
 -- blockquoteContinutation :: Parser String
 -- blockquoteContinutation = containerParser blockquoteMarker
@@ -180,26 +200,19 @@ eol =   string "\n"
     <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
     <?> "end of line"
 
-eof' :: Parser String
-eof' = "" <$ eof
-
 eolf :: Parser String
-eolf = eol <|> eof'
-
-words :: Parser String
-words = many $ noneOf "\n\r"
+eolf = eol <|> "" <$ eof
 
 line :: Parser String
-line = words <* eolf
+line = manyTillEnd anyChar eolf
 
-lines :: Parser [String]
-lines = endBy words eolf
+blankLine :: Parser ()
+blankLine = do rawLine <- line
+               if all isSpace rawLine then return PBlankLine
+               else fail "blank line"
 
-blankLine :: Parser Partial
-blankLine = many (oneOf " \t") *> eolf *> pure PBlankLine
-
-blankLine_ :: Parser ()
-blankLine_ = () <$ blankLine_
+-- blankLine_ :: Parser ()
+-- blankLine_ = () <$ try blankLine
 
 lineStart :: Parser ()
 lineStart = atMost_ 3 spaceChar
@@ -227,3 +240,12 @@ condenseSpace = helper . dropWhile isSpace
 
 -- condenseSpace' :: String -> String
 -- condenseSpace' = unwords . words
+
+
+trim :: String -> String
+trim = dropWhileRight isSpace . dropWhile isSpace
+
+dropWhileRight :: (a -> Bool) -> [a] -> [a]
+dropWhileRight p = fromMaybe [] . foldr combine Nothing
+  where combine x Nothing = if p x then Nothing else Just [x]
+        combine x xs      = (x:) <$> xs
