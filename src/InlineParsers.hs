@@ -1,5 +1,5 @@
 -- | Module to parse blocks of text into the Markdown AST.
-module InlineParser where
+module InlineParser (buildAST) where
 
 import Control.Applicative
 import Control.Monad
@@ -39,15 +39,18 @@ tokenizer = do
     ]) eof
   return tokens
 
+-- | Runs the tokenizer on the provided input.
 tokenize :: String -> Either ParseError [MdToken]
 tokenize = runParser tokenizer () ""
 
 -- | Consumes whitespace. Fails if the next character is not without consuming
 --   input.
 whitespace :: Parser Char
+whitespace = try (oneOf whitespacechars)
+
+-- | All characters considered whitespace by Markdown.
 -- Note: Can't use isSpace because Haskell also includes \v. The standard does
 -- not.
-whitespace = try (oneOf whitespacechars)
 whitespacechars :: String
 whitespacechars = "\t\r\n\f "
 
@@ -55,8 +58,15 @@ whitespacechars = "\t\r\n\f "
 punctuation :: Parser Char
 punctuation = try $ oneOf punctuationchars
 
+-- | All characters considered punctuation by Markdown.
 punctuationchars :: String
 punctuationchars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+
+-- | Create a Markdown AST from the input string
+buildAST :: String -> Markdown
+buildAST s = case tokenize s of
+  Left err     -> error "Invalid markdown"
+  Right tokens -> undefined
 
 {-
 -- | Tests if the next data to consume is a sequence of the provided character
