@@ -43,53 +43,52 @@ type BlockLevel = Writer LinkRefMap Partial
 emptyWriter :: Ord k => a -> Writer (Map k v) a
 emptyWriter = writer . (\p -> (p, Map.empty))
 
-thematicBreak, atxHeading,      setextHeading     :: Parser BlockLevel
-indentedCode,  fencedCode,      paragraph         :: Parser BlockLevel
-blockquote,    orderedListItem, unorderedListItem :: Parser BlockLevel
+thematicBreak, atxHeading,      setextHeading     :: Parser Partial
+indentedCode,  fencedCode,      paragraph         :: Parser Partial
+blockquote,    orderedListItem, unorderedListItem :: Parser Partial
 
-thematicBreak =  lineStart
-              *> thematicMarker
-              *> eol
-              *> pure (return PHorizontalRule)
+thematicBreak = lineStart *> thematicMarker *> eol *> pure PHorizontalRule
 
 atxHeading = do lineStart
                 hLevel <- atxMarker
-                content <- some spaceChar *> manyTill (noneOf "\n\r")
-                  (try $ spacesAround (many $ char '#') *> eol) <|> "" <$ eol
-                return $ return $ PHeader hLevel content
+                content <- choice
+                  [ some spaceChar *> manyTill (noneOf "\n\r")
+                      (try $ spacesAround (many $ char '#') *> eolf)
+                  , eolf
+                  ]
+                return $ PHeader hLevel content
 
 setextHeading = undefined
 
 indentedCode = undefined
 
-fencedCode = do indent <- atMost 3 spaceChar
-                let indentSize = length indent
-                openFence <- fence
-                infoString <- optionMaybe $ spacesAround $ some nonWhiteSpace
+fencedCode = do indentSize <- lineStartN
+                openFence <- fenceMarker
+                infoString <- optionMaybe $ spacesAround (some nonWhiteSpace)
                 content <- manyTill (atMost indentSize spaceChar *> litLine) $
-                  eof <|> try (do closeFence <- fence
-                                  unless (openFence `isPrefixOf` closeFence) $
-                                    parserFail "closing code fence")
-                return $ return $ PCodeBlock infoString $ concat content
-  where fence = choice $ atLeast 3 . char <$> "`~"
-        litLine = liftA2 (++) words eol
+                  choice [ try (do closeFence <- fenceMarker
+                                   unless (openFence `isPrefixOf` closeFence) $
+                                     parserFail "closing code fence")
+                         , eof
+                         ]
+                return $ PCodeBlock infoString $ concat content
+  where litLine = liftA2 (++) words eol
 
-paragraph = (emptyWriter . PParagraph) <$> continuationText
+paragraph = PParagraph <$> paragraphContent
 
-blockquote = (emptyWriter . PBlockQuote) <$>
-  (lineStart *> blockquoteMarker *> blockquoteContent)
+blockquote = PBlockQuote <$> (lineStart *> blockquoteMarker *> blockquoteContent)
 
-orderedListItem = do n <- atMostN 3 spaceChar
+orderedListItem = do n <- lineStartN
                      marker <- orderedListMarker
                      m <- repeatBetweenN 1 4 spaceChar
                      content <- listItemContent $ n + m + length marker
-                     return $ return $ POrderedList (read marker) content
+                     return $ POrderedList (read marker) content
 
-unorderedListItem = do n <- atMostN 3 spaceChar
+unorderedListItem = do n <- lineStartN
                        unorderedListMarker
                        m <- repeatBetweenN 1 4 spaceChar
                        content <- listItemContent $ n + m
-                       return $ return $ PUnorderedList content
+                       return $ PUnorderedList content
 
 linkRef :: Parser BlockLevel
 linkRef = undefined
@@ -111,6 +110,7 @@ text = undefined
 interruptMarkers :: Parser ()
 interruptMarkers = choice [ thematicMarker
                           , () <$ atxMarker
+                          , () <$ fenceMarker
                           , () <$ orderedListMarker
                           , () <$ unorderedListMarker
                           , blockquoteMarker
@@ -122,6 +122,9 @@ thematicMarker = choice $ atLeast_ 3 . breakChar <$> "*-_"
 
 atxMarker :: Parser Int
 atxMarker = repeatBetweenN 1 6 $ char '#'
+
+fenceMarker :: Parser String
+fenceMarker = choice $ atLeast 3 . char <$> "`~"
 
 orderedListMarker :: Parser String
 orderedListMarker = repeatBetween 1 9 digit <* choice (char <$> ".)")
@@ -141,8 +144,8 @@ setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eolf
 backtickString :: Parser String
 backtickString = some $ char '`'
 
-continuationText :: Parser String
-continuationText = manyTill anyChar $ try (eol *> blankLine_) <|> eof
+paragraphContent :: Parser String
+paragraphContent = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
 
 -- containerParser :: Parser a -> Parser String
 -- containerParser marker = manyTill anyChar $
@@ -200,6 +203,9 @@ blankLine_ = () <$ blankLine_
 
 lineStart :: Parser ()
 lineStart = atMost_ 3 spaceChar
+
+lineStartN :: Parser Int
+lineStartN = atMostN 3 spaceChar
 
 -- TODO deal with escaped brackets here
 linkLabel :: Parser String
