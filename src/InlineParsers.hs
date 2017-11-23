@@ -28,7 +28,7 @@ ppunctuation = Punctuation <$> punctuation
 -- | Parser that parses the maximal span of characters that aren't whitespace
 --   or punctuation
 pword :: Parser MdToken
-pword = Word <$> many1Till anyChar (lookAhead (whitespace <|> punctuation)) where
+pword = Word <$> many1 (noneOf $ punctuationchars ++ whitespacechars) where
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
@@ -37,7 +37,6 @@ tokenizer = do
     , pwhitespace
     , pword
     ]) eof
-  eof
   return tokens
 
 tokenize :: String -> Either ParseError [MdToken]
@@ -48,11 +47,17 @@ tokenize = runParser tokenizer () ""
 whitespace :: Parser Char
 -- Note: Can't use isSpace because Haskell also includes \v. The standard does
 -- not.
-whitespace = try (oneOf "\t\r\n\f ")
+whitespace = try (oneOf whitespacechars)
+whitespacechars :: String
+whitespacechars = "\t\r\n\f "
 
 -- | Consumes punctuation. Fails if it is not without consuming input.
 punctuation :: Parser Char
-punctuation = try $ oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+punctuation = try $ oneOf punctuationchars
+
+punctuationchars :: String
+punctuationchars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+
 {-
 -- | Tests if the next data to consume is a sequence of the provided character
 --   and that it meets the criteria to be a left flanking delimiter. Consumes
