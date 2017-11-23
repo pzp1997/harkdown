@@ -3,6 +3,7 @@ module Parser where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
+import Data.Char (isSpace)
 import Data.List (isPrefixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -36,7 +37,8 @@ inlineP = undefined
 
 -- the Monoid instance for Map is a left biased union
 
-type BlockLevel = Writer (Map String String) Partial
+type LinkRefMap = Map String (String, Maybe String)
+type BlockLevel = Writer LinkRefMap Partial
 
 emptyWriter :: Ord k => a -> Writer (Map k v) a
 emptyWriter = writer . (\p -> (p, Map.empty))
@@ -46,17 +48,15 @@ indentedCode,  fencedCode,      paragraph         :: Parser BlockLevel
 blockquote,    orderedListItem, unorderedListItem :: Parser BlockLevel
 
 thematicBreak =  lineStart
-              *> choice (atLeast_ 3 . breakChar <$> "*-_")
+              *> thematicMarker
               *> eol
               *> pure (return PHorizontalRule)
-  where breakChar c = char c <* many spaceChar
 
 atxHeading = do lineStart
-                hLevel <- repeatBetweenN 1 6 hashtagChar
+                hLevel <- atxMarker
                 content <- some spaceChar *> manyTill (noneOf "\n\r")
-                  (try $ spacesAround (many hashtagChar) *> eol) <|> "" <$ eol
+                  (try $ spacesAround (many $ char '#') *> eol) <|> "" <$ eol
                 return $ return $ PHeader hLevel content
-  where hashtagChar = char '#'
 
 setextHeading = undefined
 
@@ -77,7 +77,7 @@ fencedCode = do indent <- atMost 3 spaceChar
 paragraph = (emptyWriter . PParagraph) <$> continuationText
 
 blockquote = (emptyWriter . PBlockQuote) <$>
-  (lineStart *> blockquoteMarker *> blockquoteContinutation)
+  (lineStart *> blockquoteMarker *> blockquoteContent)
 
 orderedListItem = do n <- atMostN 3 spaceChar
                      marker <- orderedListMarker
@@ -106,10 +106,22 @@ image = undefined
 autolink = undefined
 text = undefined
 
--------------------------------  HELPER PARSERS  ------------------------------
+----------------------------------- MARKERS -----------------------------------
 
-backtickString :: Parser String
-backtickString = some $ char '`'
+interruptMarkers :: Parser ()
+interruptMarkers = choice [ thematicMarker
+                          , () <$ atxMarker
+                          , () <$ orderedListMarker
+                          , () <$ unorderedListMarker
+                          , blockquoteMarker
+                          ]
+
+thematicMarker :: Parser ()
+thematicMarker = choice $ atLeast_ 3 . breakChar <$> "*-_"
+  where breakChar c = char c <* many spaceChar
+
+atxMarker :: Parser Int
+atxMarker = repeatBetweenN 1 6 $ char '#'
 
 orderedListMarker :: Parser String
 orderedListMarker = repeatBetween 1 9 digit <* choice (char <$> ".)")
@@ -117,37 +129,46 @@ orderedListMarker = repeatBetween 1 9 digit <* choice (char <$> ".)")
 unorderedListMarker :: Parser Char
 unorderedListMarker = choice $ char <$> "-+*"
 
-listMarker :: Parser ()
-listMarker = () <$ orderedListMarker <|> () <$ unorderedListMarker
-
 blockquoteMarker :: Parser ()
 blockquoteMarker = char '>' *> optional (char ' ') *> return ()
 
 setextMarker :: Parser Int
 setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eolf
 
-continuationText :: Parser String
-continuationText = manyTill anyChar $ try (eol *> blankLine) <|> eof'
 
-containerParser :: Parser a -> Parser String
-containerParser marker = manyTill anyChar $
-  try (eol *> (() <$ blankLine) <|> (() <$ lookAhead marker)) <|> eof
+-------------------------------  HELPER PARSERS  ------------------------------
+
+backtickString :: Parser String
+backtickString = some $ char '`'
+
+continuationText :: Parser String
+continuationText = manyTill anyChar $ try (eol *> blankLine_) <|> eof
+
+-- containerParser :: Parser a -> Parser String
+-- containerParser marker = manyTill anyChar $
+--   try (eol *> blankLine_ <|> (() <$ lookAhead marker)) <|> eof
 
 -- TODO this should actually stop parsing whenever ANY block level marker
 -- that is indented less than w spaces is found. Can be re-used for blockquote
 -- with the special case of w = 4.
+container :: Parser () -> Int -> Parser String
+container blank w = manyTill anyChar $
+  try (eol *> lookAhead
+                ((atMost_ w spaceChar <* interruptMarkers)
+                 <|> blank))
+  <|> eof
+
 listItemContent :: Int -> Parser String
-listItemContent w = manyTill anyChar $
-  try (eol *> lookAhead (atMost_ w spaceChar <* listMarker) <|> (() <$ lookAhead blankLine)) <|> eof
+listItemContent = container $ blankLine_ *> blankLine_
 
-blockquoteContinutation :: Parser String
-blockquoteContinutation = containerParser blockquoteMarker
+blockquoteContent :: Parser String
+blockquoteContent = container blankLine_ 3
 
-orderedListContinutation :: Parser String
-orderedListContinutation = containerParser orderedListMarker
-
-lineStart :: Parser ()
-lineStart = atMost_ 3 spaceChar
+-- blockquoteContinutation :: Parser String
+-- blockquoteContinutation = containerParser blockquoteMarker
+--
+-- orderedListContinutation :: Parser String
+-- orderedListContinutation = containerParser orderedListMarker
 
 ----------------------------  DEFINITIONAL PARSERS  ---------------------------
 
@@ -171,5 +192,32 @@ line = words <* eolf
 lines :: Parser [String]
 lines = endBy words eolf
 
-blankLine :: Parser String
-blankLine = liftA2 (++) (many $ oneOf " \t") eolf
+blankLine :: Parser Partial
+blankLine = many (oneOf " \t") *> eolf *> pure PBlankLine
+
+blankLine_ :: Parser ()
+blankLine_ = () <$ blankLine_
+
+lineStart :: Parser ()
+lineStart = atMost_ 3 spaceChar
+
+-- TODO deal with escaped brackets here
+linkLabel :: Parser String
+linkLabel = between (char '[') (char ']') contentP
+  where contentP = do ref <- repeatBetween 1 999 (noneOf "[]")
+                      if all isSpace ref then fail "valid link ref"
+                      else return $ condenseSpace ref
+
+condenseSpace :: String -> String
+condenseSpace = helper . dropWhile isSpace
+  where helper [x]
+          | isSpace x              = ""
+        helper [x, y]
+          | isSpace x && isSpace y = ""
+        helper (x : xs@(y : ys))
+          | isSpace x && isSpace y = helper $ ' ' : ys
+          | otherwise              = x : helper xs
+        helper a                   = a
+
+-- condenseSpace' :: String -> String
+-- condenseSpace' = unwords . words

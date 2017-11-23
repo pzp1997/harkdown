@@ -3,8 +3,8 @@ module AST where
 data Markdown
   = Bold Markdown
   | Italics Markdown
-  | Link String Markdown
-  | Image String Markdown
+  | Link String (Maybe String) Markdown
+  | Image String (Maybe String) Markdown
   | Header Int Markdown
   | Paragraph Markdown
   | OrderedList Int Bool [Markdown]
