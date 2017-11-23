@@ -3,7 +3,8 @@ module ParserCombinators where
 import Control.Applicative
 import Data.Char (isSpace)
 
-import Text.Parsec (satisfy, char, skipMany, between)
+import Text.Parsec (satisfy, char, skipMany, between
+  , notFollowedBy, manyTill, try, lookAhead)
 import Text.Parsec.String (Parser)
 
 atLeast :: Int -> Parser a -> Parser [a]
@@ -45,3 +46,12 @@ spacesAround = between (many spaceChar) (many spaceChar)
 
 -- manyTill :: Parser a -> Parser b -> Parser [a]
 -- manyTill p end = (try end *> return []) <|> liftA2 (:) p manyTill
+
+-- | Variant of manyTill that only succeeds if the first parser succeeds at
+--   least once.
+many1Till :: (Show a, Show b) => Parser a -> Parser b -> Parser[a]
+many1Till p end = do
+  notFollowedBy end
+  aVal <- p
+  rest <- manyTill p end
+  return $ aVal : rest
