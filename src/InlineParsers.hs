@@ -93,6 +93,20 @@ instance Monad TokenParser where
 inlineMarkdown :: TokenParser Markdown
 inlineMarkdown = undefined
 
+
+-- Utilities for parsing individual types.
+-- | Consumes one punctuation token, where the punctuation character is c.
+--   Fails if the next token isn't punctuation or isn't the right character.
+punctParser_ :: Char -> TokenParser ()
+punctParser_ c = P $ \tokens -> case tokens of
+  ((Punctuation p):xs) -> if p == c then [((), xs)] else []
+  _ -> []
+
+-- | Applies the parser n times, creating a list of the matched values
+tokenCount :: Int -> TokenParser a -> TokenParser [a]
+tokenCount 0 p = return []
+tokenCount n p = (:) <$> p <*> tokenCount (n - 1) p
+
 -- | Consumes an emphasis block, and generates a Bold Markdown block. As the
 --   contents of the block is itself a Markdown tree, the 
 emphasisBlock :: TokenParser Markdown
@@ -113,7 +127,7 @@ buildAST s = case tokenize s of
     Nothing     -> error "Invalid markdown"
     Just (a, _) -> a
   where
-      dropNotFullyConsumed = dropWhile (\(_, l) -> not $ null l)
+    dropNotFullyConsumed = dropWhile (\(_, l) -> not $ null l)
 
 {-
 -- | Tests if the next data to consume is a sequence of the provided character
