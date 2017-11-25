@@ -5,10 +5,13 @@ module InlineParser (buildAST) where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Identity
 
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
+import Text.Parsec.Prim
+import Text.Parsec.Combinator
 
 import Data.Maybe (listToMaybe)
 
@@ -69,25 +72,7 @@ punctuationchars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 -- Set up a parallel parser over the list so that it can be consumed
 -- applicatively
 
-newtype TokenParser a = P { doParse :: [MdToken] -> [(a, [MdToken])] }
-
-instance Functor TokenParser where
-  fmap :: (a -> b) -> TokenParser a -> TokenParser b
-  fmap = liftA
-
-instance Applicative TokenParser where
-  pure x    = P $ \tokens -> [(x, tokens)]
-  p1 <*> p2 = P $ \ s -> do {
-    (f, s')  <- doParse p1 s;
-    (x, s'') <- doParse p2 s';
-    return (f x, s'')}
-
-instance Monad TokenParser where
-  return  = pure
-  (>>=)  :: TokenParser a -> (a -> TokenParser b) -> TokenParser b
-  x >>= f = P $ \tokens -> do
-    (a, tokens')  <- doParse x tokens
-    doParse (f a) tokens'
+type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser Markdown
@@ -95,22 +80,66 @@ inlineMarkdown = undefined
 
 
 -- Utilities for parsing individual types.
--- | Consumes one punctuation token, where the punctuation character is c.
+-- | Consumes one punctuation token, where the punctuation character is in s.
 --   Fails if the next token isn't punctuation or isn't the right character.
-punctParser_ :: Char -> TokenParser ()
-punctParser_ c = P $ \tokens -> case tokens of
-  ((Punctuation p):xs) -> if p == c then [((), xs)] else []
-  _ -> []
+punctParser :: String -> TokenParser Char
+punctParser s = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Punctuation c -> if c `elem` s then Just c else Nothing
+    _             -> Nothing
 
--- | Applies the parser n times, creating a list of the matched values
-tokenCount :: Int -> TokenParser a -> TokenParser [a]
-tokenCount 0 p = return []
-tokenCount n p = (:) <$> p <*> tokenCount (n - 1) p
+-- | Consumes a block of whitespace, yielding the whitespace block encountered.
+whitespaceParser :: TokenParser String
+whitespaceParser = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Whitespace w -> Just w
+    _            -> Nothing
 
--- | Consumes an emphasis block, and generates a Bold Markdown block. As the
---   contents of the block is itself a Markdown tree, the 
+-- | Escapes punctuation characters. If a \ preceeds an escapable punctuation,
+--   the following Punctuation type is replaced with a Word type and the \ is
+--   discarded.
+runEscapes :: [MdToken] -> [MdToken]
+-- In the future we may want to pull this into the original tokenizer
+runEscapes (Punctuation '\\':Punctuation x:xs)
+  -- Escapable punctuation
+  | x `elem` "*\\_[]<>()\"\'" = (Word [x]) : runEscapes xs
+  -- Not escapable punctuation
+  | otherwise = (Word "\\") : runEscapes (Punctuation x : xs)
+runEscapes (x:xs) = x : runEscapes xs
+
+-- | Consumes a star emphasis block, and generates a Bold Markdown block. The
+--   contents of the block is itself a Markdown tree.
+emphasisBlockStars :: TokenParser Markdown
+emphasisBlockStars = Bold <$>
+  (punctParser "*" *> manyTill inlineMarkdown endParser)
+  where
+    endParser = do
+      punctParser "*" -- Consume the closing *
+      -- Whitespace must be there, but not consumed
+      lookAhead $ try whitespaceParser
+      return ()
+
+-- | Consumes an underscore emphasis block, and generates a Bold Markdown
+--   block. The contents of the block is itself a Markdown tree.
+emphasisBlockUnderscores :: TokenParser Markdown
+emphasisBlockUnderscores = Bold <$>
+  (punctParser "_" *> manyTill inlineMarkdown endParser)
+  where
+    endParser = do
+      punctParser "_" -- Consume the closing *
+      -- Whitespace must be there, but not consumed
+      lookAhead $ try whitespaceParser
+      return ()
+
+-- | Parser for an emphasis block. Assumes that the calling parser already
+--   ensured that the conditions for a left flanking delimiter have been met.
 emphasisBlock :: TokenParser Markdown
-emphasisBlock = undefined
+emphasisBlock = emphasisBlockStars Control.Applicative.<|>
+                emphasisBlockUnderscores
 
 -- | Consumes an html pre, script, or style block and consumes all tokens until
 --   it reaches its associated close tag. It then uses that to generate a Text
@@ -120,7 +149,10 @@ preBlock = undefined
 
 -- | Create a Markdown AST from the input string. Errors if the string can't be
 --   fully consumed to create valid Markdown.
+
 buildAST :: String -> Markdown
+buildAST = undefined
+{-
 buildAST s = case tokenize s of
   Left err     -> error "Invalid markdown"
   Right tokens -> case listToMaybe $ dropNotFullyConsumed (doParse inlineMarkdown tokens) of
@@ -128,64 +160,27 @@ buildAST s = case tokenize s of
     Just (a, _) -> a
   where
     dropNotFullyConsumed = dropWhile (\(_, l) -> not $ null l)
-
-{-
--- | Tests if the next data to consume is a sequence of the provided character
---   and that it meets the criteria to be a left flanking delimiter. Consumes
---   the delimiter on success. Does not consume input on failure.
-leftFlankingDelimiter :: Char -> Parser String
-leftFlankingDelimiter c = try match where
-  match = do
-    delim <- many1 c
-    notFollowedBy whitespace
-    notFollowedBy punctuation <|> (notFollowedBy $ string ['\\', c])
-    return delim
-
--- | Tests if the next data to consume is the provided string and meets the
---   criteria to be a right flanking delimiter. Consumes the delimiter on
---   success. Does not consume input on failure.
-rightFlankingDelimiter :: String -> Parser String
-rightFlankingDelimiter s = try match where
-  match = undefined
-   -}
+-}
 
 -- | Parses inline content and creates an inline AST. Stops at the end of
 --   the block.
-inline :: Parser Markdown
+inline :: TokenParser Markdown
 inline = undefined
 
-code :: Parser Markdown
+code :: TokenParser Markdown
 code = undefined
 
-italics :: Parser Markdown
+italics :: TokenParser Markdown
 italics = undefined
-{-
--- | Parser for an emphasis inline block. Emphasis is signified by another
---   inline block surrounded by a single * or _ character.
---   On failure the parser does not consume input.
---   This parser assumes that the calling parser has already checked that the
---   left flanking delimiter is not preceded by something to make it invalid.
---   Does not work with emphasis delimiter _. (Underscore is much more
---   complicated)
-emphasis :: MdParser
-emphasis = try parseStarEmphasis where
-  parseStarEmphasis :: Parser IlParser
-  parseStarEmphasis = leftFlankingDelimiter "*" *> inline <*
-                      rightFlankingDelimiter "*"
 
--- | Parser for a strong emphasis inline block. Strong emphasis is signified
---   by two or three
-strongEmphasis :: MdParser
-strongEmphasis = undefined
--}
-link :: Parser Markdown
+link :: TokenParser Markdown
 link = undefined
 
-image :: Parser Markdown
+image :: TokenParser Markdown
 image = undefined
 
-autolink :: Parser Markdown
+autolink :: TokenParser Markdown
 autolink = undefined
 
-text :: Parser Markdown
+text :: TokenParser Markdown
 text = undefined

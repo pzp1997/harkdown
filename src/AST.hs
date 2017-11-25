@@ -1,7 +1,7 @@
 module AST (Markdown(..)) where
 
 data Markdown
-  = Bold Markdown
+  = Bold [Markdown]
   | Italics Markdown
   | Link String Markdown
   | Image String Markdown
