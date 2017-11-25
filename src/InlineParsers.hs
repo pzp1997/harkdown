@@ -19,14 +19,14 @@ import AST
 import ParserCombinators
 
 data MdToken
-  = Whitespace String
+  = Whitespace Char
   | Punctuation Char
   | Word String
   deriving (Show, Eq)
 
 -- | Parser that parses the maximal span of whitespace characters
 pwhitespace :: Parser MdToken
-pwhitespace = Whitespace <$> many1 whitespace
+pwhitespace = Whitespace <$> whitespace
 
 -- | Parser that parses a single punctuation character.
 ppunctuation :: Parser MdToken
@@ -91,7 +91,7 @@ punctParser s = tokenPrim show nextPos testMatch
     _             -> Nothing
 
 -- | Consumes a block of whitespace, yielding the whitespace block encountered.
-whitespaceParser :: TokenParser String
+whitespaceParser :: TokenParser Char
 whitespaceParser = tokenPrim show nextPos testMatch
   where
   nextPos   ps x xs = incSourceColumn ps 1
