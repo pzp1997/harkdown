@@ -151,16 +151,11 @@ preBlock = undefined
 --   fully consumed to create valid Markdown.
 
 buildAST :: String -> Markdown
-buildAST = undefined
-{-
-buildAST s = case tokenize s of
-  Left err     -> error "Invalid markdown"
-  Right tokens -> case listToMaybe $ dropNotFullyConsumed (doParse inlineMarkdown tokens) of
-    Nothing     -> error "Invalid markdown"
-    Just (a, _) -> a
-  where
-    dropNotFullyConsumed = dropWhile (\(_, l) -> not $ null l)
--}
+buildAST s = case do
+  tokens <- tokenize s
+  runParser inlineMarkdown () "" (runEscapes tokens) of
+  (Right result) -> result
+  (Left err)     -> error $ show err
 
 -- | Parses inline content and creates an inline AST. Stops at the end of
 --   the block.
