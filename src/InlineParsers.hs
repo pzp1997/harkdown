@@ -115,7 +115,7 @@ runEscapes (x:xs) = x : runEscapes xs
 --   contents of the block is itself a Markdown tree.
 emphasisBlockStars :: TokenParser Markdown
 emphasisBlockStars = Bold <$>
-  (punctParser "*" *> manyTill inlineMarkdown endParser)
+  (punctParser "*" *> manyTill (try inlineMarkdown) endParser)
   where
     endParser = do
       punctParser "*" -- Consume the closing *
@@ -127,7 +127,7 @@ emphasisBlockStars = Bold <$>
 --   block. The contents of the block is itself a Markdown tree.
 emphasisBlockUnderscores :: TokenParser Markdown
 emphasisBlockUnderscores = Bold <$>
-  (punctParser "_" *> manyTill inlineMarkdown endParser)
+  (punctParser "_" *> manyTill (try inlineMarkdown) endParser)
   where
     endParser = do
       punctParser "_" -- Consume the closing *
