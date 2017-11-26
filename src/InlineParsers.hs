@@ -47,11 +47,12 @@ pEOF = do
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
-  tokens <- manyTill (choice
+  tokens <- Text.Parsec.Prim.many $ choice
     [ ppunctuation
     , pwhitespace
     , pword
-    ]) eof
+    , pEOF
+    ]
   return tokens
 
 -- | Runs the tokenizer on the provided input.
