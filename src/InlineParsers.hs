@@ -10,8 +10,8 @@ import Control.Monad.Identity
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
-import Text.Parsec.Prim
-import Text.Parsec.Combinator
+import qualified Text.Parsec.Prim as Prim (many)
+import qualified Text.Parsec.Combinator as C
 
 import Data.Maybe (listToMaybe)
 
@@ -47,7 +47,7 @@ pEOF = do
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
-  tokens <- Text.Parsec.Prim.many $ choice
+  tokens <- Prim.many $ choice
     [ ppunctuation
     , pwhitespace
     , pword
@@ -85,7 +85,7 @@ type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
-inlineMarkdown = Text.Parsec.Prim.many $ choice
+inlineMarkdown = Prim.many $ choice
     [ emphasisBlock
     , italics
     , code
@@ -176,7 +176,13 @@ buildAST s = case do
   (Left err)     -> error $ show err
 
 code :: TokenParser Markdown
-code = undefined
+code = try $ do
+  C.optional $ Prim.many whitespaceNoNewline
+  count 3 (punctParser "`")
+  label <- optionMaybe textString
+  C.optional $ Prim.many textWhitespace
+  content <- manyTill (textString Control.Applicative.<|> textWhitespace) (try $ count 3 (punctParser "`"))
+  return $ BlockLiteral label (foldr (++) "" content)
 
 italics :: TokenParser Markdown
 italics = undefined
@@ -192,3 +198,13 @@ autolink = undefined
 
 text :: TokenParser Markdown
 text = undefined
+
+textString :: TokenParser String
+textString = undefined
+
+textWhitespace :: TokenParser String
+textWhitespace = undefined
+
+-- Parses any whitespace tokens that are not newlines and creates Text.
+whitespaceNoNewline :: TokenParser Markdown
+whitespaceNoNewline = undefined
