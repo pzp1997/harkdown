@@ -51,7 +51,6 @@ tokenizer = do
     [ ppunctuation
     , pwhitespace
     , pword
-    , pEOF
     ]
   return tokens
 
@@ -129,6 +128,12 @@ runEscapes (Punctuation '\\':Punctuation x:xs)
   | otherwise = (Word "\\") : runEscapes (Punctuation x : xs)
 runEscapes (x:xs) = x : runEscapes xs
 
+-- | Version of count that throws away the contents
+count_ :: Int -> TokenParser a -> TokenParser ()
+count_ x p = do
+  count x p
+  return ()
+
 -- | Consumes a star emphasis block, and generates a Bold Markdown block. The
 --   contents of the block is itself a Markdown tree.
 emphasisBlockStars :: TokenParser Markdown
@@ -181,7 +186,11 @@ code = try $ do
   count 3 (punctParser "`")
   label <- optionMaybe textString
   C.optional $ Prim.many textWhitespace
-  content <- manyTill (textString Control.Applicative.<|> textWhitespace) (try $ count 3 (punctParser "`"))
+  content <- manyTill
+    (textString Control.Applicative.<|> textWhitespace)
+    ((try $ count_ 3 (punctParser "`")) <|> eof)
+  -- Throw away whitespace on the same line
+  C.optional $ Prim.many whitespaceNoNewline
   return $ BlockLiteral label (foldr (++) "" content)
 
 italics :: TokenParser Markdown
@@ -199,11 +208,14 @@ autolink = undefined
 text :: TokenParser Markdown
 text = undefined
 
+-- | Consumes any token and produces the contained value as a string. Should generally be used in manyTill
+--   to consume until a stop condition is met.
 textString :: TokenParser String
 textString = undefined
 
 textWhitespace :: TokenParser String
 textWhitespace = undefined
+  
 
 -- Parses any whitespace tokens that are not newlines and creates Text.
 whitespaceNoNewline :: TokenParser Markdown
