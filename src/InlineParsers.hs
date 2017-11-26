@@ -23,7 +23,6 @@ data MdToken
   = Whitespace Char
   | Punctuation Char
   | Word String
-  | TokenEOF
   deriving (Show, Eq)
 
 -- | Parser that parses the maximal span of whitespace characters
@@ -38,12 +37,6 @@ ppunctuation = Punctuation <$> punctuation
 --   or punctuation
 pword :: Parser MdToken
 pword = Word <$> many1 (noneOf $ punctuationchars ++ whitespacechars) where
-
--- | Parser that parses the eof only
-pEOF :: Parser MdToken
-pEOF = do
-  eof
-  return TokenEOF
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
@@ -211,7 +204,13 @@ text = undefined
 -- | Consumes any token and produces the contained value as a string. Should generally be used in manyTill
 --   to consume until a stop condition is met.
 textString :: TokenParser String
-textString = undefined
+textString = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Whitespace  w -> Just [w]
+    Punctuation p -> Just [p]
+    Word        w -> Just w
 
 textWhitespace :: TokenParser String
 textWhitespace = undefined
