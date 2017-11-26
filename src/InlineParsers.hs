@@ -213,9 +213,20 @@ textString = tokenPrim show nextPos testMatch
     Word        w -> Just w
 
 textWhitespace :: TokenParser String
-textWhitespace = undefined
-  
+textWhitespace = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Whitespace  w -> Just [w]
+    _             -> Nothing
 
 -- Parses any whitespace tokens that are not newlines and creates Text.
-whitespaceNoNewline :: TokenParser Markdown
-whitespaceNoNewline = undefined
+whitespaceNoNewline :: TokenParser String
+whitespaceNoNewline = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Whitespace '\n' -> Nothing
+    Whitespace '\r' -> Nothing
+    Whitespace  w   -> Just [w]
+    _               -> Nothing
