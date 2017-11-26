@@ -84,8 +84,17 @@ punctuationchars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Top level token parser for any kind of Markdown
-inlineMarkdown :: TokenParser Markdown
-inlineMarkdown = undefined
+inlineMarkdown :: TokenParser [Markdown]
+inlineMarkdown = Text.Parsec.Prim.many $ choice
+    [ emphasisBlock
+    , italics
+    , code
+    , preBlock
+    , link
+    , image
+    , autolink
+    , text
+    ]
 
 
 -- Utilities for parsing individual types.
@@ -124,7 +133,7 @@ runEscapes (x:xs) = x : runEscapes xs
 --   contents of the block is itself a Markdown tree.
 emphasisBlockStars :: TokenParser Markdown
 emphasisBlockStars = Bold <$>
-  (punctParser "*" *> manyTill (try inlineMarkdown) endParser)
+  (punctParser "*" *> (try inlineMarkdown) <* endParser)
   where
     endParser = do
       punctParser "*" -- Consume the closing *
@@ -136,7 +145,7 @@ emphasisBlockStars = Bold <$>
 --   block. The contents of the block is itself a Markdown tree.
 emphasisBlockUnderscores :: TokenParser Markdown
 emphasisBlockUnderscores = Bold <$>
-  (punctParser "_" *> manyTill (try inlineMarkdown) endParser)
+  (punctParser "_" *> (try inlineMarkdown) <* endParser)
   where
     endParser = do
       punctParser "_" -- Consume the closing *
@@ -159,17 +168,12 @@ preBlock = undefined
 -- | Create a Markdown AST from the input string. Errors if the string can't be
 --   fully consumed to create valid Markdown.
 
-buildAST :: String -> Markdown
+buildAST :: String -> [Markdown]
 buildAST s = case do
   tokens <- tokenize s
   runParser inlineMarkdown () "" (runEscapes tokens) of
   (Right result) -> result
   (Left err)     -> error $ show err
-
--- | Parses inline content and creates an inline AST. Stops at the end of
---   the block.
-inline :: TokenParser Markdown
-inline = undefined
 
 code :: TokenParser Markdown
 code = undefined
