@@ -33,19 +33,32 @@ pwhitespace = Whitespace <$> whitespace
 -- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
 plinebreak :: Parser MdToken
 plinebreak = do
-  char '\r' <|> endOfLine
+  endOfLine <|> char '\r'
   return $ NewLine
 
 -- | Parser that parses a single punctuation character.
 ppunctuation :: Parser MdToken
 ppunctuation = Punctuation <$> punctuation
 
+-- | Utility to throw away the result of the parser. Used to make combinators happy.
+skip :: Parser a -> Parser ()
+skip p = do
+  p
+  return ()
+
+-- | Variant of manyTill that must match at least once.
+many1Till :: Parser a -> Parser end -> Parser [a]
+many1Till p end = do
+  res <- manyTill p end
+  guard (not $ null res)
+  return res
+
 -- | Parser that parses the maximal span of characters that aren't whitespace
 --   or punctuation
 pword :: Parser MdToken
-pword = Word <$> manyTill
+pword = Word <$> many1Till
                    anyChar
-                   (lookAhead $ pwhitespace <|> plinebreak <|> ppunctuation)
+                   (lookAhead $ skip (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
