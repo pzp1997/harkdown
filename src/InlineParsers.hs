@@ -21,6 +21,7 @@ import ParserCombinators
 -- | Data structure used for the tokenization of the input
 data MdToken
   = Whitespace Char
+  | NewLine
   | Punctuation Char
   | Word String
   deriving (Show, Eq)
@@ -29,12 +30,11 @@ data MdToken
 pwhitespace :: Parser MdToken
 pwhitespace = Whitespace <$> whitespace
 
--- | Parses any form of a newline [\r, \r\n, \n] and returns \n as whitespace.
---   Fails if it can't match the appropriate whitespace.
+-- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
 plinebreak :: Parser MdToken
 plinebreak = do
   char '\r' <|> endOfLine
-  return $ Whitespace '\n'
+  return $ NewLine
 
 -- | Parser that parses a single punctuation character.
 ppunctuation :: Parser MdToken
@@ -43,7 +43,9 @@ ppunctuation = Punctuation <$> punctuation
 -- | Parser that parses the maximal span of characters that aren't whitespace
 --   or punctuation
 pword :: Parser MdToken
-pword = Word <$> many1 (noneOf $ punctuationchars ++ whitespacechars) where
+pword = Word <$> manyTill
+                   anyChar
+                   (lookAhead $ pwhitespace <|> plinebreak <|> ppunctuation)
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
@@ -59,26 +61,17 @@ tokenizer = do
 tokenize :: String -> Either ParseError [MdToken]
 tokenize = runParser tokenizer () ""
 
--- | Consumes whitespace. Fails if the next character is not without consuming
---   input.
+-- | Consumes whitespace.
 whitespace :: Parser Char
-whitespace = try (oneOf whitespacechars)
+-- All characters considered whitespace by Markdown excluding newlines.
+whitespace = oneOf "\t\f "
 
--- | All characters considered whitespace by Markdown excluding newlines.
-whitespacechars :: String
-whitespacechars = "\t\f "
-
--- | Consumes punctuation. Fails if it is not without consuming input.
+-- | Consumes punctuation.
 punctuation :: Parser Char
-punctuation = try $ oneOf punctuationchars
+-- All characters considered punctuation by Markdown.
+punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
--- | All characters considered punctuation by Markdown.
-punctuationchars :: String
-punctuationchars = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
-
--- Set up a parallel parser over the list so that it can be consumed
--- applicatively
-
+-- | Parser that works over the MdTokens defined above instead of Strings.
 type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Top level token parser for any kind of Markdown
