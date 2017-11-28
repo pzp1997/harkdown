@@ -18,27 +18,8 @@ import Data.Maybe (listToMaybe)
 import AST
 import ParserCombinators
 
--- | Data structure used for the tokenization of the input
-data MdToken
-  = Whitespace Char
-  | NewLine
-  | Punctuation Char
-  | Word String
-  deriving (Show, Eq)
 
--- | Parser that parses the maximal span of whitespace characters
-pwhitespace :: Parser MdToken
-pwhitespace = Whitespace <$> whitespace
-
--- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
-plinebreak :: Parser MdToken
-plinebreak = do
-  endOfLine <|> char '\r'
-  return $ NewLine
-
--- | Parser that parses a single punctuation character.
-ppunctuation :: Parser MdToken
-ppunctuation = Punctuation <$> punctuation
+-- Additional combinators --------------
 
 -- | Utility to throw away the result of the parser. Used to make combinators happy.
 skip :: Parser a -> Parser ()
@@ -53,12 +34,49 @@ many1Till p end = do
   guard (not $ null res)
   return res
 
+
+-----------------------------------------
+
+-- Initial pass tokenization ------------
+
+-- | Data structure used for the tokenization of the input
+data MdToken
+  = Whitespace Char
+  | NewLine
+  | Punctuation Char
+  | Word String
+  deriving (Show, Eq)
+
+-- | Parser that parses the maximal span of whitespace characters
+pwhitespace :: Parser MdToken
+pwhitespace = Whitespace <$> whitespace
+
+-- | Consumes whitespace.
+whitespace :: Parser Char
+-- All characters considered whitespace by Markdown excluding newlines.
+whitespace = oneOf "\t\f "
+
+-- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
+plinebreak :: Parser MdToken
+plinebreak = do
+  endOfLine <|> char '\r'
+  return $ NewLine
+
+-- | Parser that parses a single punctuation character.
+ppunctuation :: Parser MdToken
+ppunctuation = Punctuation <$> punctuation
+
+-- | Consumes punctuation.
+punctuation :: Parser Char
+-- All characters considered punctuation by Markdown.
+punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+
 -- | Parser that parses the maximal span of characters that aren't whitespace
---   or punctuation
+--   or punctuation.
 pword :: Parser MdToken
 pword = Word <$> many1Till
-                   anyChar
-                   (lookAhead $ skip (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
+  anyChar
+  (lookAhead $ skip (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
@@ -74,15 +92,9 @@ tokenizer = do
 tokenize :: String -> Either ParseError [MdToken]
 tokenize = runParser tokenizer () ""
 
--- | Consumes whitespace.
-whitespace :: Parser Char
--- All characters considered whitespace by Markdown excluding newlines.
-whitespace = oneOf "\t\f "
+-----------------------------------------
 
--- | Consumes punctuation.
-punctuation :: Parser Char
--- All characters considered punctuation by Markdown.
-punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+-- Second pass markdown parser (over tokens) ----
 
 -- | Parser that works over the MdTokens defined above instead of Strings.
 type TokenParser a = ParsecT [MdToken] () Identity a
@@ -187,15 +199,16 @@ buildAST s = case do
 
 code :: TokenParser Markdown
 code = try $ do
-  C.optional $ Prim.many whitespaceNoNewline
+  C.optional $ Prim.many textWhitespace
   count 3 (punctParser "`")
   label <- optionMaybe textString
-  C.optional $ Prim.many textWhitespace
+  newLine
   content <- manyTill
-    (textString Control.Applicative.<|> textWhitespace)
+    (textString <|> textWhitespace)
     ((try $ count_ 3 (punctParser "`")) <|> eof)
   -- Throw away whitespace on the same line
-  C.optional $ Prim.many whitespaceNoNewline
+  C.optional $ Prim.many textWhitespace
+  C.optional newLine
   return $ BlockLiteral label (foldr (++) "" content)
 
 italics :: TokenParser Markdown
@@ -223,6 +236,7 @@ textString = tokenPrim show nextPos testMatch
     Whitespace  w -> Just [w]
     Punctuation p -> Just [p]
     Word        w -> Just w
+    NewLine       -> Just "\n"
 
 textWhitespace :: TokenParser String
 textWhitespace = tokenPrim show nextPos testMatch
@@ -232,13 +246,10 @@ textWhitespace = tokenPrim show nextPos testMatch
     Whitespace  w -> Just [w]
     _             -> Nothing
 
--- Parses any whitespace tokens that are not newlines and creates Text.
-whitespaceNoNewline :: TokenParser String
-whitespaceNoNewline = tokenPrim show nextPos testMatch
+newLine :: TokenParser Char
+newLine = tokenPrim show nextPos testMatch
   where
   nextPos   ps x xs = incSourceColumn ps 1
   testMatch t       = case t of
-    Whitespace '\n' -> Nothing
-    Whitespace '\r' -> Nothing
-    Whitespace  w   -> Just [w]
-    _               -> Nothing
+    NewLine -> Just '\n'
+    _       -> Nothing
