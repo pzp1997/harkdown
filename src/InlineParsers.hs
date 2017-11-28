@@ -29,6 +29,13 @@ data MdToken
 pwhitespace :: Parser MdToken
 pwhitespace = Whitespace <$> whitespace
 
+-- | Parses any form of a newline [\r, \r\n, \n] and returns \n as whitespace.
+--   Fails if it can't match the appropriate whitespace.
+plinebreak :: Parser MdToken
+plinebreak = do
+  char '\r' <|> endOfLine
+  return $ Whitespace '\n'
+
 -- | Parser that parses a single punctuation character.
 ppunctuation :: Parser MdToken
 ppunctuation = Punctuation <$> punctuation
@@ -42,6 +49,7 @@ tokenizer :: Parser [MdToken]
 tokenizer = do
   tokens <- Prim.many $ choice
     [ ppunctuation
+    , plinebreak
     , pwhitespace
     , pword
     ]
@@ -56,11 +64,9 @@ tokenize = runParser tokenizer () ""
 whitespace :: Parser Char
 whitespace = try (oneOf whitespacechars)
 
--- | All characters considered whitespace by Markdown.
--- Note: Can't use isSpace because Haskell also includes \v. The standard does
--- not.
+-- | All characters considered whitespace by Markdown excluding newlines.
 whitespacechars :: String
-whitespacechars = "\t\r\n\f "
+whitespacechars = "\t\f "
 
 -- | Consumes punctuation. Fails if it is not without consuming input.
 punctuation :: Parser Char
