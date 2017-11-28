@@ -59,7 +59,8 @@ whitespace = oneOf "\t\f "
 -- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
 plinebreak :: Parser MdToken
 plinebreak = do
-  endOfLine <|> char '\r'
+  -- needs to be in try so that the leading \r isn't consumed on failure.
+  (try endOfLine) <|> char '\r'
   return $ NewLine
 
 -- | Parser that parses a single punctuation character.
