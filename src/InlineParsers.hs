@@ -201,12 +201,14 @@ buildAST s = case do
 code :: TokenParser Markdown
 code = try $ do
   C.optional $ Prim.many textWhitespace
-  count 3 (punctParser "`")
+  atLeast_ 3 (punctParser "`")
+  -- Find out how many additional ticks the user gave
+  addlTicks <- many (punctParser "`")
   label <- optionMaybe textString
   newLine
   content <- manyTill
     (textString <|> textWhitespace)
-    ((try $ count_ 3 (punctParser "`")) <|> eof)
+    ((try $ count_ (3 + length addlTicks) (punctParser "`")) <|> eof)
   -- Throw away whitespace on the same line
   C.optional $ Prim.many textWhitespace
   C.optional newLine

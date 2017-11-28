@@ -4,7 +4,7 @@ import Control.Applicative
 import Data.Char (isSpace)
 
 import Text.Parsec (satisfy, char, skipMany, between
-  , notFollowedBy, manyTill, try, lookAhead)
+  , notFollowedBy, manyTill, try, lookAhead, Parsec)
 import Text.Parsec.String (Parser)
 
 atLeast :: Int -> Parser a -> Parser [a]
@@ -17,7 +17,7 @@ atMost n p
   | n >= 0    = liftA2 (:) p (atMost (n - 1) p) <|> return []
   | otherwise = fail "too many"
 
-atLeast_ :: Int -> Parser a -> Parser ()
+atLeast_ :: Int -> Parsec s () a -> Parsec s () ()
 atLeast_ n p
   | n > 0     = p *> atLeast_ (n - 1) p
   | otherwise = skipMany p
