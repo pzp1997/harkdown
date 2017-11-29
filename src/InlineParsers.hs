@@ -100,25 +100,26 @@ tokenize = runParser tokenizer () ""
 type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
---   length using the supplied character. It returns the string used as the
---   delimiter.
-leftFlankingDelim :: Int -> Char -> TokenParser String
+--   length using the supplied character. It returns the pair of the maybe
+--   character consumed to delineate a left flanking delimiter and the string
+--   used as the delimiter.
+leftFlankingDelim :: Int -> Char -> TokenParser (Maybe Char, String)
 leftFlankingDelim length c = do
   pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
   s <- count length $ punctParserS [c]-- delimiter
   notFollowedBy (whitespaceParser <|> newLineParser)
   if isJust pre
-    then return s
+    then return (pre, s)
     else do
       notFollowedBy punctParser
-      return s
+      return (pre, s)
 
 -- | Parser that recognizes a right flanking delimiter run of the supplied
 --   length using the supplied character. It returns the string used as the
 --   delimiter.
 rightFlankingDelim :: Int -> Char -> TokenParser String
-rightFlankingDelim length c = do
-  notFollowedBy (whitespaceParser <|> newLineParser)
+rightFlankingDelim length c = undefined --do
+  --notFollowedBy (whitespaceParser <|> newLineParser)
   
 
 -- | Top level token parser for any kind of Markdown

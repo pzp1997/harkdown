@@ -4,9 +4,10 @@ import Control.Applicative
 import Data.Char (isSpace)
 
 import Text.Parsec (satisfy, char, skipMany, between
-  , notFollowedBy, manyTill, try, lookAhead, Parsec)
+  , notFollowedBy, manyTill, try, lookAhead)
 import Text.Parsec.Combinator
 import Text.Parsec.String (Parser)
+import Text.Parsec.Prim hiding (many, (<|>))
 
 atLeast :: Int -> Parser a -> Parser [a]
 atLeast n p
@@ -18,7 +19,7 @@ atMost n p
   | n >= 0    = liftA2 (:) p (atMost (n - 1) p) <|> return []
   | otherwise = fail "too many"
 
-atLeast_ :: Int -> Parsec s () a -> Parsec s () ()
+atLeast_ :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m ()
 atLeast_ n p
   | n > 0     = p *> atLeast_ (n - 1) p
   | otherwise = skipMany p
@@ -59,5 +60,5 @@ many1Till p end = do
   return $ aVal : rest
 -}
 
-exactly :: Int -> Parsec s () a -> Parsec s () [a]
+exactly :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m [a]
 exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
