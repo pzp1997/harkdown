@@ -243,25 +243,27 @@ count_ x p = do
 --   it is even it first tries strong emphasis.
 bold :: TokenParser Markdown
 bold = do
-  delim <- lookAhead $ try (leftFlankingDelimAll '*')
+  (mC, delim) <- lookAhead $ try (leftFlankingDelimAll '*' <|>
+    leftFlankingDelimAll '_')
+  let c = head delim -- Safe since leftFlankingDelimAll fails on length 0.
   if even (length delim)
     then do
-      (try strongEmParser) <|> emParser
+      (try $ strongEmParser c) <|> emParser c
     else do
-      (try emParser) <|> strongEmParser
+      (try $ emParser c) <|> strongEmParser c
 
-emParser :: TokenParser Markdown
-emParser = do
+emParser :: Char -> TokenParser Markdown
+emParser c = do
   -- TODO how to not lose the char in mC if it is Just?
-  (mC, s) <- leftFlankingDelimLen 1 '*'
-  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 1 '*')
+  (mC, s) <- leftFlankingDelimLen 1 c
+  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 1 c)
   return $ Emphasis inner
 
-strongEmParser :: TokenParser Markdown
-strongEmParser = do
+strongEmParser :: Char -> TokenParser Markdown
+strongEmParser c = do
   -- TODO how to not lose the char in mC if it is Just?
-  (mC, s) <- leftFlankingDelimLen 2 '*'
-  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 2 '*')
+  (mC, s) <- leftFlankingDelimLen 2 c
+  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 2 c)
   return $ StrongEmphasis inner
 
 -- | Consumes an html pre, script, or style block and consumes all tokens until
