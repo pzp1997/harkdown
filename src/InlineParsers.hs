@@ -28,7 +28,8 @@ skip p = do
   return ()
 
 -- | Variant of manyTill that must match at least once.
-many1Till :: Parser a -> Parser end -> Parser [a]
+many1Till :: Stream s m t =>
+  ParsecT s u m a -> ParsecT s u m end -> ParsecT s u m [a]
 many1Till p end = do
   res <- manyTill p end
   guard (not $ null res)
@@ -101,15 +102,30 @@ tokenize = runParser tokenizer () ""
 type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
---   length using the supplied character. It returns the pair of the maybe
---   character consumed to delineate a left flanking delimiter and the string
---   used as the delimiter.
-leftFlankingDelim :: Int -> Char -> TokenParser (Maybe Char, String)
-leftFlankingDelim length c = do
+--   character. It returns the pair of the maybe character consumed to
+--   delineate a left flanking delimiter and the string used as the delimiter.
+leftFlankingDelimAll :: Char -> TokenParser (Maybe Char, String)
+leftFlankingDelimAll c = do
   pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
+  sof <- optionMaybe startOfFileParser
+  s <- many1 $ punctParserS [c]-- delimiter
+  notFollowedBy (whitespaceParser <|> newLineParser)
+  if isJust pre || isJust sof
+    then return (pre, s)
+    else do
+      notFollowedBy punctParser
+      return (pre, s)
+
+-- | Parser that recognizes a left flanking delimiter run of the supplied
+--   character. It returns the pair of the maybe character consumed to
+--   delineate a left flanking delimiter and the string used as the delimiter.
+leftFlankingDelimLen :: Int -> Char -> TokenParser (Maybe Char, String)
+leftFlankingDelimLen length c = do
+  pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
+  sof <- optionMaybe startOfFileParser
   s <- count length $ punctParserS [c]-- delimiter
   notFollowedBy (whitespaceParser <|> newLineParser)
-  if isJust pre
+  if isJust pre || isJust sof
     then return (pre, s)
     else do
       notFollowedBy punctParser
@@ -131,15 +147,9 @@ rightFlankingDelim length c = do
       return s
 
 -- | Top level token parser for any kind of Markdown
-inlineMarkdown :: TokenParser [Markdown]
-inlineMarkdown = Prim.many $ choice
-    [ emphasisBlock
-    , italics
-    , code
-    , preBlock
-    , link
-    , image
-    , autolink
+inlineMarkdown :: TokenParser Markdown
+inlineMarkdown = choice
+    [ try bold
     , text
     ]
 
@@ -214,12 +224,13 @@ startOfFileParser = tokenPrim show nextPos testMatch
 --   discarded.
 runEscapes :: [MdToken] -> [MdToken]
 -- In the future we may want to pull this into the original tokenizer
-runEscapes (Punctuation '\\':Punctuation x:xs)
+runEscapes (Punctuation '\\' : (Punctuation x) : xs)
   -- Escapable punctuation
   | x `elem` "*\\_[]<>()\"\'" = (Word [x]) : runEscapes xs
   -- Not escapable punctuation
-  | otherwise = (Word "\\") : runEscapes (Punctuation x : xs)
+  | otherwise                 = (Word "\\") : runEscapes (Punctuation x : xs)
 runEscapes (x:xs) = x : runEscapes xs
+runEscapes []     = []
 
 -- | Version of count that throws away the contents
 count_ :: Int -> TokenParser a -> TokenParser ()
@@ -227,35 +238,31 @@ count_ x p = do
   count x p
   return ()
 
--- | Consumes a star emphasis block, and generates a Bold Markdown block. The
---   contents of the block is itself a Markdown tree.
-emphasisBlockStars :: TokenParser Markdown
-emphasisBlockStars = Bold <$>
-  (punctParserS "*" *> (try inlineMarkdown) <* endParser)
-  where
-    endParser = do
-      punctParserS "*" -- Consume the closing *
-      -- Whitespace must be there, but not consumed
-      lookAhead $ try whitespaceParser
-      return ()
+-- | TokenParser That matches emphasis or strong emphasis. If the left flanking
+--   delimiter is of odd length is tries emphasis and then strong emphasis. If
+--   it is even it first tries strong emphasis.
+bold :: TokenParser Markdown
+bold = do
+  delim <- lookAhead $ try (leftFlankingDelimAll '*')
+  if even (length delim)
+    then do
+      (try strongEmParser) <|> emParser
+    else do
+      (try emParser) <|> strongEmParser
 
--- | Consumes an underscore emphasis block, and generates a Bold Markdown
---   block. The contents of the block is itself a Markdown tree.
-emphasisBlockUnderscores :: TokenParser Markdown
-emphasisBlockUnderscores = Bold <$>
-  (punctParserS "_" *> (try inlineMarkdown) <* endParser)
-  where
-    endParser = do
-      punctParserS "_" -- Consume the closing *
-      -- Whitespace must be there, but not consumed
-      lookAhead $ try whitespaceParser
-      return ()
+emParser :: TokenParser Markdown
+emParser = do
+  -- TODO how to not lose the char in mC if it is Just?
+  (mC, s) <- leftFlankingDelimLen 1 '*'
+  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 1 '*')
+  return $ Emphasis inner
 
--- | Parser for an emphasis block. Assumes that the calling parser already
---   ensured that the conditions for a left flanking delimiter have been met.
-emphasisBlock :: TokenParser Markdown
-emphasisBlock = emphasisBlockStars <|>
-                emphasisBlockUnderscores
+strongEmParser :: TokenParser Markdown
+strongEmParser = do
+  -- TODO how to not lose the char in mC if it is Just?
+  (mC, s) <- leftFlankingDelimLen 2 '*'
+  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 2 '*')
+  return $ StrongEmphasis inner
 
 -- | Consumes an html pre, script, or style block and consumes all tokens until
 --   it reaches its associated close tag. It then uses that to generate a Text
@@ -269,7 +276,7 @@ preBlock = undefined
 buildAST :: String -> [Markdown]
 buildAST s = case do
   tokens <- tokenize s
-  runParser inlineMarkdown () "" (runEscapes tokens) of
+  runParser (many1 inlineMarkdown) () "" (runEscapes tokens) of
   (Right result) -> result
   (Left err)     -> error $ show err
 
@@ -301,11 +308,14 @@ image = undefined
 autolink :: TokenParser Markdown
 autolink = undefined
 
+-- | Parser that consumes any token as text. Should only be used after all
+--   other possibilities have been exhausted.
+--   
 text :: TokenParser Markdown
-text = undefined
+text = Text <$> textString
 
--- | Consumes any token and produces the contained value as a string. Should generally be used in manyTill
---   to consume until a stop condition is met.
+-- | Consumes any token and produces the contained value as a string. Should
+--   generally be used in manyTill to consume until a stop condition is met.
 textString :: TokenParser String
 textString = tokenPrim show nextPos testMatch
   where
@@ -315,6 +325,7 @@ textString = tokenPrim show nextPos testMatch
     Punctuation p -> Just [p]
     Word        w -> Just w
     NewLine       -> Just "\n"
+    StartOfFile   -> Just ""
 
 textWhitespace :: TokenParser String
 textWhitespace = tokenPrim show nextPos testMatch
