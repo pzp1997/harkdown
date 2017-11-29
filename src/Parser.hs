@@ -72,7 +72,10 @@ atxHeading = do lineStart
 
 setextHeading = undefined
 
-indentedCode = undefined
+indentedCode = (PCodeBlock Nothing . concat . concat) <$> sepByInclusive indentedChunk (some blankLine)
+  where indentedChunk = some $ try indentedLine
+        indentedLine = do atLeast 4 spaceChar
+                          nonBlankLine
 
 fencedCode = do indentSize <- lineStart
                 openFence <- fenceMarker
@@ -88,9 +91,9 @@ fencedCode = do indentSize <- lineStart
                          ]
                 return $ PCodeBlock infoString $ concat content
 
-paragraph = PParagraph <$> (lineStart *> paragraphContent)
+paragraph = PParagraph <$> (lineStart *> paragraphContent 3)
 
-blockquote = PBlockQuote <$> (lineStart *> blockquoteMarker *> paragraphContent)
+blockquote = (PBlockQuote . unlines) <$> manyTill (lineStart *> blockquoteMarker *> paragraphContent 3) (try blankLine)
 
 orderedListItem = do n <- lineStart
                      marker <- orderedListMarker
@@ -105,6 +108,9 @@ unorderedListItem = do n <- lineStart
 
 linkRef :: Parser BlockLevel
 linkRef = undefined
+-- linkRef = lineStart *> linkLabel <*> char ':' <* spacesAround (optional eol) <* linkDestination <*> spacesAround (optional eol)
+--   where linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> fail "TODO" -- TODO figure out what they mean by matching parens
+--         linkTitle = undefined
 
 ----------------------------  INLINE LEVEL PARSERS  ---------------------------
 
@@ -127,6 +133,7 @@ interruptMarkers = choice $ (try . lookAhead) <$> [ thematicMarker
                                                   , () <$ orderedListMarker
                                                   , () <$ unorderedListMarker
                                                   , blockquoteMarker
+                                                  , () <$ blankLine
                                                   ]
 
 thematicMarker :: Parser ()
@@ -156,10 +163,10 @@ setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eolf
 backtickString :: Parser String
 backtickString = some $ char '`'
 
-paragraphContent :: Parser String
+paragraphContent :: Int -> Parser String
 -- paragraphContent = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
-paragraphContent = manyTill anyChar $
-  try (eol *> ((lineStart *> interruptMarkers) <|> blankLine)) <|> eof
+paragraphContent w = manyTill anyChar $ try stop <|> eof
+  where stop = eol *> atMost w spaceChar *> interruptMarkers
 
 -- containerParser :: Parser a -> Parser String
 -- containerParser marker = manyTill anyChar $
@@ -171,13 +178,13 @@ paragraphContent = manyTill anyChar $
 continueContent :: Parser String
 continueContent = manyTill anyChar $ try $ choice
                     [ eol *> choice [ lineStart *> interruptMarkers
-                                    , blankLine
+                                    , () <$ blankLine
                                     ]
                     , eof
                     ]
 
-
-listItemContent = undefined
+listItemContent :: Int -> Parser String
+listItemContent w = sepBy (anyChar) (try (someTill blankLine eof))
 
 -- listItemContent :: Int -> Parser String
 -- listItemContent = container $ blankLine *> blankLine -- TODO this is wrong
@@ -206,10 +213,15 @@ eolf = eol <|> "" <$ eof
 line :: Parser String
 line = manyTillEnd anyChar eolf
 
-blankLine :: Parser ()
+blankLine :: Parser String
 blankLine = do rawLine <- line
-               if all isSpace rawLine then return ()
+               if all isSpace rawLine then return rawLine
                else fail "blank line"
+
+nonBlankLine :: Parser String
+nonBlankLine = do rawLine <- line
+                  if all isSpace rawLine then fail "non-blank line"
+                  else return rawLine
 
 lineStart :: Parser Int
 lineStart = atMostN 3 spaceChar

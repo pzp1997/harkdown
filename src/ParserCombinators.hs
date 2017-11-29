@@ -3,7 +3,8 @@ module ParserCombinators where
 import Control.Applicative
 import Data.Char (isSpace)
 
-import Text.Parsec (satisfy, char, skipMany, between)
+import Text.Parsec (satisfy, char, skipMany, between, try)
+import Text.Parsec.Combinator (count, manyTill)
 import Text.Parsec.String (Parser)
 
 atLeast :: Int -> Parser a -> Parser [a]
@@ -60,3 +61,14 @@ spacesAround = between (many spaceChar) (many spaceChar)
 manyTillEnd :: Parser a -> Parser [a] -> Parser [a]
 manyTillEnd p end = scan
   where scan = end <|> liftA2 (:) p scan
+
+sepByInclusive :: Parser a -> Parser a -> Parser [a]
+sepByInclusive p sep = liftA2 (:) p (concat <$> many (liftA2 twoList sep p)) <|> pure []
+  where twoList x y = [x, y]
+
+-- exactly :: Int -> Parser a -> Parser [a]
+exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
+
+
+someTill :: Parser a -> Parser b -> Parser [a]
+someTill p sep = liftA2 (:) p (manyTill p sep)
