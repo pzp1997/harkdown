@@ -13,7 +13,7 @@ import Text.Parsec.String (Parser)
 import qualified Text.Parsec.Prim as Prim (many)
 import qualified Text.Parsec.Combinator as C
 
-import Data.Maybe (listToMaybe)
+import Data.Maybe (isJust)
 
 import AST
 import ParserCombinators
@@ -33,7 +33,6 @@ many1Till p end = do
   res <- manyTill p end
   guard (not $ null res)
   return res
-
 
 -----------------------------------------
 
@@ -100,6 +99,28 @@ tokenize = runParser tokenizer () ""
 -- | Parser that works over the MdTokens defined above instead of Strings.
 type TokenParser a = ParsecT [MdToken] () Identity a
 
+-- | Parser that recognizes a left flanking delimiter run of the supplied
+--   length using the supplied character. It returns the string used as the
+--   delimiter.
+leftFlankingDelim :: Int -> Char -> TokenParser String
+leftFlankingDelim length c = do
+  pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
+  s <- count length $ punctParserS [c]-- delimiter
+  notFollowedBy (whitespaceParser <|> newLineParser)
+  if isJust pre
+    then return s
+    else do
+      notFollowedBy punctParser
+      return s
+
+-- | Parser that recognizes a right flanking delimiter run of the supplied
+--   length using the supplied character. It returns the string used as the
+--   delimiter.
+rightFlankingDelim :: Int -> Char -> TokenParser String
+rightFlankingDelim length c = do
+  notFollowedBy (whitespaceParser <|> newLineParser)
+  
+
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
 inlineMarkdown = Prim.many $ choice
@@ -115,17 +136,37 @@ inlineMarkdown = Prim.many $ choice
 
 
 -- Utilities for parsing individual types.
+-- | Consumes one punctuation token. Fails if the next token isn't punctuation.
+punctParser :: TokenParser Char
+punctParser = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Punctuation c -> Just c
+    _             -> Nothing
+
 -- | Consumes one punctuation token, where the punctuation character is in s.
 --   Fails if the next token isn't punctuation or isn't the right character.
-punctParser :: String -> TokenParser Char
-punctParser s = tokenPrim show nextPos testMatch
+punctParserS :: String -> TokenParser Char
+punctParserS s = tokenPrim show nextPos testMatch
   where
   nextPos   ps x xs = incSourceColumn ps 1
   testMatch t       = case t of
     Punctuation c -> if c `elem` s then Just c else Nothing
     _             -> Nothing
 
--- | Consumes a block of whitespace, yielding the whitespace block encountered.
+-- | Consumes one punctuation token unless the punctuation character is in s.
+--   Fails if the next token isn't punctuation or is in the exception list.
+punctParserN :: String -> TokenParser Char
+punctParserN except = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Punctuation c -> if c `elem` except then Nothing else Just c
+    _             -> Nothing
+
+-- | Consumes a block of whitespace, yielding the whitespace character
+--   encountered.
 whitespaceParser :: TokenParser Char
 whitespaceParser = tokenPrim show nextPos testMatch
   where
@@ -133,6 +174,15 @@ whitespaceParser = tokenPrim show nextPos testMatch
   testMatch t       = case t of
     Whitespace w -> Just w
     _            -> Nothing
+
+-- | Consumes a newline, yielding the \n character
+newLineParser :: TokenParser Char
+newLineParser = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    NewLine -> Just '\n'
+    _       -> Nothing
 
 -- | Escapes punctuation characters. If a \ preceeds an escapable punctuation,
 --   the following Punctuation type is replaced with a Word type and the \ is
@@ -156,10 +206,10 @@ count_ x p = do
 --   contents of the block is itself a Markdown tree.
 emphasisBlockStars :: TokenParser Markdown
 emphasisBlockStars = Bold <$>
-  (punctParser "*" *> (try inlineMarkdown) <* endParser)
+  (punctParserS "*" *> (try inlineMarkdown) <* endParser)
   where
     endParser = do
-      punctParser "*" -- Consume the closing *
+      punctParserS "*" -- Consume the closing *
       -- Whitespace must be there, but not consumed
       lookAhead $ try whitespaceParser
       return ()
@@ -168,10 +218,10 @@ emphasisBlockStars = Bold <$>
 --   block. The contents of the block is itself a Markdown tree.
 emphasisBlockUnderscores :: TokenParser Markdown
 emphasisBlockUnderscores = Bold <$>
-  (punctParser "_" *> (try inlineMarkdown) <* endParser)
+  (punctParserS "_" *> (try inlineMarkdown) <* endParser)
   where
     endParser = do
-      punctParser "_" -- Consume the closing *
+      punctParserS "_" -- Consume the closing *
       -- Whitespace must be there, but not consumed
       lookAhead $ try whitespaceParser
       return ()
@@ -179,7 +229,7 @@ emphasisBlockUnderscores = Bold <$>
 -- | Parser for an emphasis block. Assumes that the calling parser already
 --   ensured that the conditions for a left flanking delimiter have been met.
 emphasisBlock :: TokenParser Markdown
-emphasisBlock = emphasisBlockStars Control.Applicative.<|>
+emphasisBlock = emphasisBlockStars <|>
                 emphasisBlockUnderscores
 
 -- | Consumes an html pre, script, or style block and consumes all tokens until
@@ -201,14 +251,14 @@ buildAST s = case do
 code :: TokenParser Markdown
 code = try $ do
   C.optional $ Prim.many textWhitespace
-  atLeast_ 3 (punctParser "`")
+  atLeast_ 3 (punctParserS "`")
   -- Find out how many additional ticks the user gave
-  addlTicks <- many (punctParser "`")
+  addlTicks <- many (punctParserS "`")
   label <- optionMaybe textString
   newLine
   content <- manyTill
     (textString <|> textWhitespace)
-    ((try $ count_ (3 + length addlTicks) (punctParser "`")) <|> eof)
+    ((try $ count_ (3 + length addlTicks) (punctParserS "`")) <|> eof)
   -- Throw away whitespace on the same line
   C.optional $ Prim.many textWhitespace
   C.optional newLine

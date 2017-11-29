@@ -5,6 +5,7 @@ import Data.Char (isSpace)
 
 import Text.Parsec (satisfy, char, skipMany, between
   , notFollowedBy, manyTill, try, lookAhead, Parsec)
+import Text.Parsec.Combinator
 import Text.Parsec.String (Parser)
 
 atLeast :: Int -> Parser a -> Parser [a]
@@ -57,3 +58,6 @@ many1Till p end = do
   rest <- manyTill p end
   return $ aVal : rest
 -}
+
+exactly :: Int -> Parsec s () a -> Parsec s () [a]
+exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
