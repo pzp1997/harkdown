@@ -22,7 +22,7 @@ import ParserCombinators
 -- Additional combinators --------------
 
 -- | Utility to throw away the result of the parser. Used to make combinators happy.
-skip :: Parser a -> Parser ()
+skip :: Stream s m t => ParsecT s u m a -> ParsecT s u m ()
 skip p = do
   p
   return ()
@@ -44,6 +44,7 @@ data MdToken
   | NewLine
   | Punctuation Char
   | Word String
+  | StartOfFile
   deriving (Show, Eq)
 
 -- | Parser that parses the maximal span of whitespace characters
@@ -86,7 +87,7 @@ tokenizer = do
     , pwhitespace
     , pword
     ]
-  return tokens
+  return (StartOfFile : tokens)
 
 -- | Runs the tokenizer on the provided input.
 tokenize :: String -> Either ParseError [MdToken]
@@ -118,9 +119,16 @@ leftFlankingDelim length c = do
 --   length using the supplied character. It returns the string used as the
 --   delimiter.
 rightFlankingDelim :: Int -> Char -> TokenParser String
-rightFlankingDelim length c = undefined --do
-  --notFollowedBy (whitespaceParser <|> newLineParser)
-  
+rightFlankingDelim length c = do
+  notFollowedBy (anyWhitespaceParser)
+  pre <- optionMaybe (punctParserN [c])
+  s <- count length $ punctParserS [c]
+  if isJust pre
+    then return s
+    else do
+      -- Must be followed by one of these
+      lookAhead (anyWhitespaceParser <|> skip (punctParserN [c]))
+      return s
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
@@ -184,6 +192,22 @@ newLineParser = tokenPrim show nextPos testMatch
   testMatch t       = case t of
     NewLine -> Just '\n'
     _       -> Nothing
+
+-- | Parser that matches any whitespace. Must return unit to allow eof or
+--   StartOfFile.
+anyWhitespaceParser :: TokenParser ()
+anyWhitespaceParser = skip whitespaceParser <|>
+                      skip newLineParser <|>
+                      eof <|>
+                      startOfFileParser
+
+startOfFileParser :: TokenParser ()
+startOfFileParser = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    StartOfFile -> Just ()
+    _           -> Nothing
 
 -- | Escapes punctuation characters. If a \ preceeds an escapable punctuation,
 --   the following Punctuation type is replaced with a Word type and the \ is
