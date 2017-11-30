@@ -2,11 +2,11 @@ module Parser where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Writer
+-- import Control.Monad.Writer -- TODO do we need this
 import Data.Char (isSpace)
 import Data.List (isPrefixOf)
-import Data.Map (Map)
-import qualified Data.Map as Map
+-- import Data.Map (Map)       -- TODO do we need this
+-- import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 
 import Text.Parsec hiding (many, optional, (<|>))
@@ -29,19 +29,57 @@ import ParserCombinators
 -- once we have list of partials, need to go through and group runs of
 -- blockquotes, list items.
 
+mainP :: String -> [Markdown]
+mainP s = case parse (connector <$> blockP) "" (newlineTerminate s) of
+            Left  _ -> []
+            Right x -> x
+
+connector :: [Partial] -> [Markdown]
+
+connector (PUnorderedListItem c x : rest) =
+  connector $ PUnorderedList c True [mainP x] : rest
+connector (PUnorderedList c tight xs : PUnorderedListItem c' x : rest)
+  | c == c' = connector $ PUnorderedList c tight (xs ++ [mainP x]) : rest
+connector (PUnorderedList c _ xs : PBlankLine : rest@(PUnorderedListItem c' _ : _))
+  | c == c' = connector $ PUnorderedList c False xs : rest
+connector (ul@PUnorderedList{} : PBlankLine : rest) = connector $ ul : rest
+connector (PUnorderedList c tight xs : rest) =
+  UnorderedList tight xs : connector rest
+
+connector (POrderedListItem n c x : rest) = connector $ POrderedList n c [mainP x] : rest
+connector (POrderedList n c xs : POrderedListItem _ c' x : rest)
+  | c == c' = connector $ POrderedList n c (mainP x : xs) : rest
+connector (POrderedList n c xs : rest) = OrderedList n xs : connector rest
+
+connector (PBlockQuote s : PBlockQuote t : rest) = connector $ PBlockQuote (s ++ t) : rest
+connector (PBlockQuote s : rest) = BlockQuote (mainP s) : connector rest
+connector (PHeader level s : rest) = Header level (runInlineP s) : connector rest
+connector (PHorizontalRule : rest) = HorizontalRule : connector rest
+connector (PCodeBlock maybeInfo s : rest) = CodeBlock maybeInfo s : connector rest
+connector (PParagraph s : rest) = Paragraph (runInlineP $ trim s) : connector rest
+connector (PBlankLine : rest) = connector rest
+connector [] = []
+
 blockP :: Parser [Partial]
 blockP = manyTill (choice $ try <$> [ thematicBreak
-                          -- , unorderedListItem
-                          -- , orderedListItem
-                          , blockquote
-                          , atxHeading
-                          , fencedCode
-                          , blankLine *> pure PBlankLine
-                          , paragraph
-                          ]) eof
+                                    , unorderedListItem
+                                    , orderedListItem
+                                    , blockquote
+                                    , atxHeading
+                                    , fencedCode
+                                    , blankLine *> pure PBlankLine
+                                    , paragraph
+                                    ]) eof
 
 inlineP :: Parser Markdown
-inlineP = undefined
+inlineP = Text <$> many anyChar
+
+runInlineP :: String -> Markdown
+runInlineP s = case parse inlineP "" s of
+                 Left _  -> undefined -- TODO replace with something sensible
+                 Right x -> x
+
+
 -- inlineP = return . Text
 
 ----------------------------  BLOCK LEVEL PARSERS  ----------------------------
@@ -49,11 +87,11 @@ inlineP = undefined
 -- the Monoid instance for Map is a left biased union. CommonMark respects the
 -- first occurence of a ref
 
-type LinkRefMap = Map String (String, Maybe String)
-type BlockLevel = Writer LinkRefMap Partial
-
-emptyWriter :: Ord k => a -> Writer (Map k v) a
-emptyWriter = writer . (\p -> (p, Map.empty))
+-- type LinkRefMap = Map String (String, Maybe String)
+-- type BlockLevel = Writer LinkRefMap Partial
+--
+-- emptyWriter :: Ord k => a -> Writer (Map k v) a
+-- emptyWriter = writer . (\p -> (p, Map.empty))
 
 thematicBreak, atxHeading,      setextHeading     :: Parser Partial
 indentedCode,  fencedCode,      paragraph         :: Parser Partial
@@ -65,48 +103,44 @@ atxHeading = do lineStart
                 hLevel <- atxMarker
                 content <- choice
                   [ some spaceChar *> manyTill (noneOf "\n\r")
-                      (try $ spacesAround (many $ char '#') *> eolf)
-                  , eolf
+                      (try $ spacesAround (many $ char '#') *> eol)
+                  , eol
                   ]
                 return $ PHeader hLevel content
 
 setextHeading = undefined
 
-indentedCode = (PCodeBlock Nothing . concat . concat) <$> sepByInclusive indentedChunk (some blankLine)
-  where indentedChunk = some $ try indentedLine
-        indentedLine = do atLeast 4 spaceChar
-                          nonBlankLine
+indentedCode = (PCodeBlock "" . concat) <$> some (try $ indentedLine <|> blankLine)
+  where indentedLine = atLeast 4 spaceChar *> line -- TODO might be able to use line here
 
 fencedCode = do indentSize <- lineStart
                 openFence <- fenceMarker
-                infoString <- optionMaybe $ spacesAround (some nonWhiteSpace)
-                eolf
+                infoString <- line
                 content <- manyTill (atMost indentSize spaceChar *> line) $
-                  choice [ try (do lineStart
-                                   closeFence <- fenceMarker
-                                   eolf
-                                   unless (openFence `isPrefixOf` closeFence) $
-                                     fail "closing code fence")
-                         , eof
-                         ]
-                return $ PCodeBlock infoString $ concat content
+                             try (close openFence) <|> eof
+                return $ PCodeBlock (trim infoString) $ concat content
+  where close f = do lineStart
+                     closeFence <- fenceMarker
+                     eol
+                     unless (f `isPrefixOf` closeFence) $
+                       fail "closing code fence"
 
-paragraph = PParagraph <$> (lineStart *> paragraphContent 3)
+paragraph = PParagraph <$> (lineStart *> continutation 3)
 
-blockquote = (PBlockQuote . unlines) <$> manyTill (lineStart *> blockquoteMarker *> paragraphContent 3) (try blankLine)
+blockquote = PBlockQuote <$> (lineStart *> blockquoteMarker *> continutation 3)
 
 orderedListItem = do n <- lineStart
-                     marker <- orderedListMarker
+                     (index, delim) <- orderedListMarker
                      m <- repeatBetweenN 1 4 spaceChar
-                     content <- listItemContent $ n + m + length marker
-                     return $ POrderedList (read marker) content
+                     content <- listItemContent $ n + m + length index
+                     return $ POrderedListItem (read index) delim content
 
 unorderedListItem = do n <- lineStart
-                       m <- unorderedListMarker
+                       (delim, m) <- unorderedListMarker
                        content <- listItemContent $ n + m
-                       return $ PUnorderedList content
+                       return $ PUnorderedListItem delim content
 
-linkRef :: Parser BlockLevel
+linkRef :: Parser String
 linkRef = undefined
 -- linkRef = lineStart *> linkLabel <*> char ':' <* spacesAround (optional eol) <* linkDestination <*> spacesAround (optional eol)
 --   where linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> fail "TODO" -- TODO figure out what they mean by matching parens
@@ -146,11 +180,11 @@ atxMarker = repeatBetweenN 1 6 (char '#') <?> "ATX heading"
 fenceMarker :: Parser String
 fenceMarker = choice (atLeast 3 . char <$> "`~") <?> "fenced code block"
 
-orderedListMarker :: Parser String
-orderedListMarker = repeatBetween 1 9 digit <* choice (char <$> ".)") <?> "ordered list"
+orderedListMarker :: Parser (String, Char)
+orderedListMarker = liftA2 (,) (repeatBetween 1 9 digit) (choice $ char <$> ".)") <?> "ordered list"
 
-unorderedListMarker :: Parser Int
-unorderedListMarker = (choice (char <$> "-+*") *> repeatBetweenN 1 4 spaceChar) <?> "unordered list"
+unorderedListMarker :: Parser (Char, Int)
+unorderedListMarker = liftA2 (,) (choice $ char <$> "-+*") (repeatBetweenN 1 4 spaceChar) <?> "unordered list"
 
 blockquoteMarker :: Parser ()
 blockquoteMarker = (char '>' *> optional (char ' ') *> return ()) <?> "blockquote"
@@ -163,42 +197,25 @@ setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eolf
 backtickString :: Parser String
 backtickString = some $ char '`'
 
-paragraphContent :: Int -> Parser String
--- paragraphContent = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
-paragraphContent w = manyTill anyChar $ try stop <|> eof
-  where stop = eol *> atMost w spaceChar *> interruptMarkers
+continutation :: Int -> Parser String
+-- continutation = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
+continutation w = manyTillEnd anyChar $ try stop <|> "" <$ eof
+  where stop = eol <* atMost w spaceChar <* interruptMarkers
 
--- containerParser :: Parser a -> Parser String
--- containerParser marker = manyTill anyChar $
---   try (eol *> blankLine_ <|> (() <$ lookAhead marker)) <|> eof
-
--- TODO this should actually stop parsing whenever ANY block level marker
--- that is indented less than w spaces is found. Can be re-used for blockquote
--- with the special case of w = 4.
-continueContent :: Parser String
-continueContent = manyTill anyChar $ try $ choice
-                    [ eol *> choice [ lineStart *> interruptMarkers
-                                    , () <$ blankLine
-                                    ]
-                    , eof
-                    ]
+-- TODO not quite right. after the first chunk all others must be indented by at least w
+-- listItemContent :: Int -> Parser String
+-- listItemContent w = concat <$> sepBy1 (continutation w) (some $ try blankLine)
 
 listItemContent :: Int -> Parser String
-listItemContent w = sepBy (anyChar) (try (someTill blankLine eof))
+listItemContent w = do first <- continutation w
+                       rest <- many $ liftA2 (\xs x -> concat $ xs ++ [x])
+                                 (try $ some $ try blankLine)
+                                 (atLeast (w + 1) spaceChar *> continutation w)
+                       return . concat $ first : rest
+  --
+  --  concat <$> liftA2 (:) (continutation w) (option $ blankLines *>
+  -- sepBy (atLeast (w + 1) spaceChar *> continutation w) blankLines)
 
--- listItemContent :: Int -> Parser String
--- listItemContent = container $ blankLine *> blankLine -- TODO this is wrong
-
--- blockquoteContent :: Parser String
--- blockquoteContent = manyTill anyChar $
---   try (eol *> lookAhead (lineStart <* interruptMarkers) <|> blankLine)
---   <|> eof
-
--- blockquoteContinutation :: Parser String
--- blockquoteContinutation = containerParser blockquoteMarker
---
--- orderedListContinutation :: Parser String
--- orderedListContinutation = containerParser orderedListMarker
 
 ----------------------------  DEFINITIONAL PARSERS  ---------------------------
 
@@ -211,17 +228,15 @@ eolf :: Parser String
 eolf = eol <|> "" <$ eof
 
 line :: Parser String
-line = manyTillEnd anyChar eolf
+line = manyTillEnd anyChar eol
 
 blankLine :: Parser String
-blankLine = do rawLine <- line
-               if all isSpace rawLine then return rawLine
-               else fail "blank line"
+blankLine = manyTillEnd (oneOf " \t\v") eol
 
-nonBlankLine :: Parser String
-nonBlankLine = do rawLine <- line
-                  if all isSpace rawLine then fail "non-blank line"
-                  else return rawLine
+-- nonBlankLine :: Parser String
+-- nonBlankLine = do rawLine <- line
+--                   if all isSpace rawLine then fail "non-blank line"
+--                   else return rawLine
 
 lineStart :: Parser Int
 lineStart = atMostN 3 spaceChar
@@ -230,11 +245,16 @@ lineStart = atMostN 3 spaceChar
 linkLabel :: Parser String
 linkLabel = between (char '[') (char ']') contentP
   where contentP = do ref <- repeatBetween 1 999 (noneOf "[]")
-                      if all isSpace ref then fail "valid link ref"
-                      else return $ condenseSpace ref
+                      (if all isSpace ref then fail "valid link ref"
+                       else return (condenseSpace ref))
 
 
 -------------------------------  STRING HELPERS  ------------------------------
+
+newlineTerminate :: String -> String
+newlineTerminate ""   = "\n"
+newlineTerminate "\n" = "\n"
+newlineTerminate (c : cs) = c : newlineTerminate cs
 
 condenseSpace :: String -> String
 condenseSpace = helper . dropWhile isSpace

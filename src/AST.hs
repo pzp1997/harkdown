@@ -7,23 +7,28 @@ data Markdown
   | Image String (Maybe String) Markdown
   | Header Int Markdown
   | Paragraph Markdown
-  | OrderedList Int Bool [Markdown]
-  | UnorderedList Bool [Markdown]
+  | OrderedList Int [[Markdown]]
+  | UnorderedList Bool [[Markdown]]
+  -- | OrderedList Int Bool [[Markdown]]
+  -- | UnorderedList Bool [[Markdown]]
   | Text String
   | BlockQuote [Markdown]
-  | CodeBlock (Maybe String) String
+  | CodeBlock String String
   | Code String
   | HorizontalRule
   | SoftBreak
   | HardBreak
+  | Inline [Markdown]
   deriving (Eq, Show)
 
 data Partial
   = PHeader Int String
-  | POrderedList Int String
-  | PUnorderedList String
+  | POrderedListItem Int Char String
+  | PUnorderedListItem Char String
+  | POrderedList Int Char [[Markdown]]
+  | PUnorderedList Char Bool [[Markdown]]
   | PBlockQuote String
-  | PCodeBlock (Maybe String) String
+  | PCodeBlock String String
   | PHorizontalRule
   | PParagraph String
   | PBlankLine

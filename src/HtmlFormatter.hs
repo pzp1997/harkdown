@@ -1,14 +1,16 @@
 module HtmlFormatter where
 
+import Data.Maybe (maybe)
+
 import Text.PrettyPrint
 
 import AST
-import Parser (parseMarkdown)
+import Parser (mainP)
 
 type Attributes = [(String, String)]
 
 markdownToHtml :: String -> String
-markdownToHtml = renderHtml . parseMarkdown
+markdownToHtml = renderHtml . mainP
 
 renderHtml :: [Markdown] -> String
 renderHtml = render . foldMap htmlify
@@ -17,26 +19,35 @@ htmlify :: Markdown -> Doc
 htmlify (Text s)              = text s
 htmlify (Bold md)             = tag "strong" [] $ htmlify md
 htmlify (Italics md)          = tag "em" [] $ htmlify md
-htmlify (Header level md)     = tag ("h" ++ show level) [] $ htmlify md
-htmlify (Link href md)        = tag "a" [("href", href)] $ htmlify md
-htmlify (Image src md)        =
-  selfClosingTag "img" [("src", src), ("alt", concat $ extractText md)]
-htmlify (Paragraph md)        = tag "p" [] $ htmlify md
-htmlify (OrderedList items)   = tag "ol" [] $ listItems items
-htmlify (UnorderedList items) = tag "ul" [] $ listItems items
-htmlify (BlockQuote xs)       = tag "blockquote" [] $ foldMap htmlify xs
-htmlify (BlockLiteral info s) = tag "pre" [] $ tag "code" codeAttr $ text s
-  where codeAttr = case info of
-                     Just infoString -> [("class", "language-" ++ infoString)]
-                     Nothing         -> []
-htmlify (InlineLiteral s)     = tag "code" [] $ text s
-htmlify HorizontalRule        = selfClosingTag "hr" []
+htmlify (Header level md)     = nl $ tag ("h" ++ show level) [] $ htmlify md
+htmlify (Link href mTitle md) = tag "a" attr $ htmlify md
+  where attr = case mTitle of
+                 Just title -> [("href", href), ("title", title)]
+                 Nothing    -> [("href", href)]
+htmlify (Image src mTitle md) =
+  selfClosingTag "img" $ [("src", src), ("alt", concat $ extractText md)] ++
+                         maybe [] (\title -> [("title", title)]) mTitle
+htmlify (Paragraph md)        = nl $ tag "p" [] $ htmlify md
+htmlify (OrderedList 1 items) = nlTag "ol" [] $ listItems False items
+htmlify (OrderedList n items) = nlTag "ol" [("start", show n)] $ listItems False items
+htmlify (UnorderedList tight items) = nlTag "ul" [] $ listItems tight items
+htmlify (BlockQuote xs)       = nlTag "blockquote" [] $ foldMap htmlify xs
+htmlify (CodeBlock info s)    = nl $ tag "pre" [] $ tag "code" codeAttr $ text s
+  where codeAttr = if null info then [] else [("class", "language-" ++ info)]
+htmlify (Code s)     = tag "code" [] $ text s
+htmlify HorizontalRule        = nl $ selfClosingTag "hr" []
 htmlify SoftBreak             = char '\n'
 htmlify HardBreak             = selfClosingTag "br" []
 
 tag :: String -> Attributes -> Doc -> Doc
 tag tagName attr contents = text ("<" ++ tagName ++ strOfAttr attr ++ ">") <>
                               contents <> text ("</" ++ tagName ++ ">")
+
+nlTag :: String -> Attributes -> Doc -> Doc
+nlTag tagName attr contents =  text ("<" ++ tagName ++ strOfAttr attr ++ ">")
+                            <> char '\n'
+                            <> contents <> text ("</" ++ tagName ++ ">")
+                            <> char '\n'
 
 selfClosingTag :: String -> Attributes -> Doc
 selfClosingTag tagName attr = text ("<" ++ tagName ++ strOfAttr attr ++ " />")
@@ -45,20 +56,29 @@ strOfAttr :: Attributes -> String
 strOfAttr = concatMap keyValueStr
   where keyValueStr (k, v) = concat [" ", k, "=\"", v, "\""]
 
-listItems :: [Markdown] -> Doc
-listItems = foldMap $ tag "li" [] . htmlify
+listItems :: Bool -> [[Markdown]] -> Doc
+listItems tight xs
+  | tight && all singleton xs = foldMap (nl . tag "li" [] . htmlify . tightContent) xs
+  | otherwise                       = foldMap (nlTag "li" [] . foldMap htmlify) xs
+  where singleton [x] = True
+        singleton _   = False
+        tightContent [Paragraph md] = md
+        tightContent [md]           = md
+
+nl :: Doc -> Doc
+nl = (<> char '\n')
 
 extractText :: Markdown -> [String]
 extractText (Text s)              = [s]
 extractText (Bold md)             = extractText md
 extractText (Italics md)          = extractText md
 extractText (Header _ md)         = extractText md
-extractText (Link _ md)           = extractText md
-extractText (Image _ md)          = extractText md
+extractText (Link _ _ md)         = extractText md
+extractText (Image _ _ md)        = extractText md
 extractText (Paragraph md)        = extractText md
-extractText (OrderedList items)   = concatMap extractText items
-extractText (UnorderedList items) = concatMap extractText items
+extractText (OrderedList _ items) = concatMap (concatMap extractText) items
+extractText (UnorderedList _ items) = concatMap (concatMap extractText) items
 extractText (BlockQuote xs)       = concatMap extractText xs
-extractText (BlockLiteral _ s)    = [s]
-extractText (InlineLiteral s)     = [s]
+extractText (CodeBlock _ s)       = [s]
+extractText (Code s)              = [s]
 extractText HorizontalRule        = []
