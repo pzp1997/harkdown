@@ -138,21 +138,23 @@ leftFlankingDelimLen length c = do
 --   markdown document. On success or failure of the recursed parser it then
 --   resumes looking for the matching right flanking delimiter specified. If no
 --   right flanking delimiter is provided it consumes until the end of file.
-textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
+textTillDelim :: Maybe (TokenParser (String, String)) -> TokenParser [Markdown]
 textTillDelim mEnd = do
   done <- optionMaybe eof
   case done of
     Just _  -> return [] -- EOF reached
     Nothing -> do
-      -- If an end delimiter was provided, attempt to apply it.
+      -- If an end delimiter was provided, attempt to apply it. The parser
+      -- Fails if eof is reached.
       case mEnd of
         Nothing -> leftFlankOrText
         Just end -> do
+          notFollowedBy eof
           endFound <- optionMaybe (try end)
           case endFound of
-            Just _  ->
+            Just (tok, _)  ->
               -- Found the end!
-              return []
+              return [Text tok]
             Nothing -> leftFlankOrText
   where
   leftFlankOrText = do
@@ -177,18 +179,25 @@ textTillDelim mEnd = do
 
 -- | Parser that recognizes a right flanking delimiter run of the supplied
 --   length using the supplied character. It returns the string used as the
---   delimiter.
-rightFlankingDelim :: Int -> Char -> TokenParser String
+--   delimiter, as well as a token that belongs to the content being delimited
+--   that was consumed to find the delimiter (as the delimiter can't be
+--   preceded by whitespace).
+rightFlankingDelim :: Int -> Char -> TokenParser (String, String)
 rightFlankingDelim length c = do
-  notFollowedBy (anyWhitespaceParser)
-  pre <- optionMaybe (punctParserN [c])
-  s <- count length $ punctParserS [c]
-  if isJust pre
-    then return s
-    else do
-      -- Must be followed by one of these
-      lookAhead (anyWhitespaceParser <|> skip (punctParserN [c]))
-      return s
+  mPunct <- optionMaybe (punctParserN [c])
+  case mPunct of
+    Nothing -> do
+      -- not preceded by punctuation
+      -- Must be preceded by text or the parser fails
+      prev <- textString
+      delim <- count length $ punctParserS [c]
+      return (prev, delim)
+    Just p  -> do
+      -- preceded by punctuation p
+      -- Must be followed by whitespace or punctuation
+      delim <- count length $ punctParserS [c]
+      lookAhead $ anyWhitespaceParser <|> skip punctParser
+      return ([p], delim)
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
