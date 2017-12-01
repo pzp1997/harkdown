@@ -140,23 +140,25 @@ leftFlankingDelimLen length c = do
 --   right flanking delimiter is provided it consumes until the end of file.
 textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
 textTillDelim mEnd = do
-  done <- optionMaybe eof
-  case done of
-    Just _  -> return [] -- EOF reached
+  -- If an end delimiter was provided, attempt to apply it. The parser fails if
+  -- eof is reached and there is a provided end parser.
+  case mEnd of
     Nothing -> do
-      -- If an end delimiter was provided, attempt to apply it. The parser
-      -- Fails if eof is reached.
-      case mEnd of
-        Nothing -> leftFlankOrText
-        Just end -> do
-          notFollowedBy eof -- We're in a case looking for a end sequence.
-          endFound <- optionMaybe (try end)
-          case endFound of
-            Just tok ->
-              -- Found the end!
-              return [Text tok]
-            Nothing  -> leftFlankOrText
+      -- TODO handle eof
+      isEOF <- optionMaybe eof
+      if isJust isEOF
+        then return []
+        else leftFlankOrText
+    Just end -> do
+      notFollowedBy eof -- We're in a case looking for a end sequence.
+      endFound <- optionMaybe (try end)
+      case endFound of
+        Just tok ->
+          -- Found the end!
+          return [Text tok]
+        Nothing  -> leftFlankOrText
   where
+  leftFlankOrText :: TokenParser [Markdown]
   leftFlankOrText = do
     -- TODO replace this will any of the delimiters, not just *.
     delimRes <- optionMaybe (try $ leftFlankingDelimLen 1 '*')
@@ -196,7 +198,7 @@ rightFlankingDelim delim = do
       -- preceded by punctuation p
       -- Must be followed by whitespace or punctuation
       punctParserSeq delim
-      lookAhead $ anyWhitespaceParser <|> skip punctParser
+      eof <|> skip (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
       return $ [p]
 
 -- | Top level token parser for any kind of Markdown
@@ -260,7 +262,7 @@ newLineParser = tokenPrim show nextPos testMatch
     _       -> Nothing
 
 -- | Parser that matches any whitespace. Must return unit to allow eof or
---   StartOfFile.
+--   StartOfFile. Doesn't match eof when using lookAhead.
 anyWhitespaceParser :: TokenParser ()
 anyWhitespaceParser = skip whitespaceParser <|>
                       skip newLineParser <|>
