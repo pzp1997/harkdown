@@ -117,8 +117,9 @@ leftFlankingDelimAll c = do
       return (pre, s)
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
---   character. It returns the pair of the maybe character consumed to
---   delineate a left flanking delimiter and the string used as the delimiter.
+--   character. It returns the pair of the maybe char consumed to
+--   delineate a left flanking delimiter (whitespace or punctuation) and the
+--   string used as the delimiter.
 leftFlankingDelimLen :: Int -> Char -> TokenParser (Maybe Char, String)
 leftFlankingDelimLen length c = do
   pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
@@ -130,6 +131,49 @@ leftFlankingDelimLen length c = do
     else do
       notFollowedBy punctParser
       return (pre, s)
+
+-- | Parses as much as possible until it encounters any valid left flanking
+--   delimiter or the provided specific right flanking delimiter. If a left
+--   flanking delimiter is encountered it attempts to recurse for that nested
+--   markdown document. On success or failure of the recursed parser it then
+--   resumes looking for the matching right flanking delimiter specified. If no
+--   right flanking delimiter is provided it consumes until the end of file.
+textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
+textTillDelim mEnd = do
+  done <- optionMaybe eof
+  case done of
+    Just _  -> return [] -- EOF reached
+    Nothing -> do
+      -- If an end delimiter was provided, attempt to apply it.
+      case mEnd of
+        Nothing -> leftFlankOrText
+        Just end -> do
+          endFound <- optionMaybe (try end)
+          case endFound of
+            Just _  ->
+              -- Found the end!
+              return []
+            Nothing -> leftFlankOrText
+  where
+  leftFlankOrText = do
+    delimRes <- optionMaybe (try $ leftFlankingDelimLen 1 '*')
+    
+    case delimRes of
+      Nothing             ->
+        -- No left flanking delimiter. Consume another token as text.
+        (:) <$> text <*> textTillDelim Nothing
+      Just (mC, delim) -> do -- Left flanking delimiter found
+        -- Content that will go into the delimited element
+        inline <- textTillDelim (Just $ rightFlankingDelim (length delim) (head delim))
+        -- Everything after
+        rem    <- textTillDelim Nothing
+        case mC of
+          Nothing -> do
+            -- Don't need to consume anything extra
+            return $ (Emphasis inline) : rem
+          Just c -> do
+            -- Need to consume the extra token (whitespace, newline, punct)
+            return $ (Text [c]) : (Emphasis inline) : rem
 
 -- | Parser that recognizes a right flanking delimiter run of the supplied
 --   length using the supplied character. It returns the string used as the
@@ -147,11 +191,8 @@ rightFlankingDelim length c = do
       return s
 
 -- | Top level token parser for any kind of Markdown
-inlineMarkdown :: TokenParser Markdown
-inlineMarkdown = choice
-    [ try bold
-    , text
-    ]
+inlineMarkdown :: TokenParser [Markdown]
+inlineMarkdown = textTillDelim Nothing
 
 
 -- Utilities for parsing individual types.
@@ -238,34 +279,6 @@ count_ x p = do
   count x p
   return ()
 
--- | TokenParser That matches emphasis or strong emphasis. If the left flanking
---   delimiter is of odd length is tries emphasis and then strong emphasis. If
---   it is even it first tries strong emphasis.
-bold :: TokenParser Markdown
-bold = do
-  (mC, delim) <- lookAhead $ try (leftFlankingDelimAll '*' <|>
-    leftFlankingDelimAll '_')
-  let c = head delim -- Safe since leftFlankingDelimAll fails on length 0.
-  if even (length delim)
-    then do
-      (try $ strongEmParser c) <|> emParser c
-    else do
-      (try $ emParser c) <|> strongEmParser c
-
-emParser :: Char -> TokenParser Markdown
-emParser c = do
-  -- TODO how to not lose the char in mC if it is Just?
-  (mC, s) <- leftFlankingDelimLen 1 c
-  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 1 c)
-  return $ Emphasis inner
-
-strongEmParser :: Char -> TokenParser Markdown
-strongEmParser c = do
-  -- TODO how to not lose the char in mC if it is Just?
-  (mC, s) <- leftFlankingDelimLen 2 c
-  inner <- many1Till inlineMarkdown (try $ rightFlankingDelim 2 c)
-  return $ StrongEmphasis inner
-
 -- | Consumes an html pre, script, or style block and consumes all tokens until
 --   it reaches its associated close tag. It then uses that to generate a Text
 --   Markdown leaf.
@@ -278,7 +291,7 @@ preBlock = undefined
 buildAST :: String -> [Markdown]
 buildAST s = case do
   tokens <- tokenize s
-  runParser (many1 inlineMarkdown) () "" (runEscapes tokens) of
+  runParser inlineMarkdown () "" (runEscapes tokens) of
   (Right result) -> result
   (Left err)     -> error $ show err
 
