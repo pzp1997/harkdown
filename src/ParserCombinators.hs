@@ -3,8 +3,11 @@ module ParserCombinators where
 import Control.Applicative
 import Data.Char (isSpace)
 
-import Text.Parsec (satisfy, char, skipMany, between)
+import Text.Parsec (satisfy, char, skipMany, between
+  , notFollowedBy, manyTill, try, lookAhead)
+import Text.Parsec.Combinator
 import Text.Parsec.String (Parser)
+import Text.Parsec.Prim hiding (many, (<|>))
 
 atLeast :: Int -> Parser a -> Parser [a]
 atLeast n p
@@ -16,7 +19,7 @@ atMost n p
   | n >= 0    = liftA2 (:) p (atMost (n - 1) p) <|> return []
   | otherwise = fail "too many"
 
-atLeast_ :: Int -> Parser a -> Parser ()
+atLeast_ :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m ()
 atLeast_ n p
   | n > 0     = p *> atLeast_ (n - 1) p
   | otherwise = skipMany p
@@ -45,3 +48,17 @@ spacesAround = between (many spaceChar) (many spaceChar)
 
 -- manyTill :: Parser a -> Parser b -> Parser [a]
 -- manyTill p end = (try end *> return []) <|> liftA2 (:) p manyTill
+
+{-
+-- | Variant of manyTill that only succeeds if the first parser succeeds at
+--   least once.
+many1Till :: (Show a, Show b) => Parser a -> Parser b -> Parser[a]
+many1Till p end = do
+  notFollowedBy end
+  aVal <- p
+  rest <- manyTill p end
+  return $ aVal : rest
+-}
+
+exactly :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m [a]
+exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
