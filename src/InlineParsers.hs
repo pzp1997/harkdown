@@ -138,7 +138,7 @@ leftFlankingDelimLen length c = do
 --   markdown document. On success or failure of the recursed parser it then
 --   resumes looking for the matching right flanking delimiter specified. If no
 --   right flanking delimiter is provided it consumes until the end of file.
-textTillDelim :: Maybe (TokenParser (String, String)) -> TokenParser [Markdown]
+textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
 textTillDelim mEnd = do
   done <- optionMaybe eof
   case done of
@@ -149,24 +149,25 @@ textTillDelim mEnd = do
       case mEnd of
         Nothing -> leftFlankOrText
         Just end -> do
-          notFollowedBy eof
+          notFollowedBy eof -- We're in a case looking for a end sequence.
           endFound <- optionMaybe (try end)
           case endFound of
-            Just (tok, _)  ->
+            Just tok ->
               -- Found the end!
               return [Text tok]
-            Nothing -> leftFlankOrText
+            Nothing  -> leftFlankOrText
   where
   leftFlankOrText = do
+    -- TODO replace this will any of the delimiters, not just *.
     delimRes <- optionMaybe (try $ leftFlankingDelimLen 1 '*')
-    
+
     case delimRes of
       Nothing             ->
         -- No left flanking delimiter. Consume another token as text.
         (:) <$> text <*> textTillDelim Nothing
       Just (mC, delim) -> do -- Left flanking delimiter found
         -- Content that will go into the delimited element
-        inline <- textTillDelim (Just $ rightFlankingDelim (length delim) (head delim))
+        inline <- textTillDelim (Just $ rightFlankingDelim delim)
         -- Everything after
         rem    <- textTillDelim Nothing
         case mC of
@@ -177,27 +178,26 @@ textTillDelim mEnd = do
             -- Need to consume the extra token (whitespace, newline, punct)
             return $ (Text [c]) : (Emphasis inline) : rem
 
--- | Parser that recognizes a right flanking delimiter run of the supplied
---   length using the supplied character. It returns the string used as the
---   delimiter, as well as a token that belongs to the content being delimited
+-- | Parser that recognizes a right flanking delimiter run matching delim.
+--   It returns the token that belongs to the content being delimited
 --   that was consumed to find the delimiter (as the delimiter can't be
 --   preceded by whitespace).
-rightFlankingDelim :: Int -> Char -> TokenParser (String, String)
-rightFlankingDelim length c = do
-  mPunct <- optionMaybe (punctParserN [c])
+rightFlankingDelim :: String -> TokenParser String
+rightFlankingDelim delim = do
+  mPunct <- optionMaybe (punctParserN delim)
   case mPunct of
     Nothing -> do
       -- not preceded by punctuation
       -- Must be preceded by text or the parser fails
       prev <- textString
-      delim <- count length $ punctParserS [c]
-      return (prev, delim)
+      punctParserSeq delim
+      return prev
     Just p  -> do
       -- preceded by punctuation p
       -- Must be followed by whitespace or punctuation
-      delim <- count length $ punctParserS [c]
+      punctParserSeq delim
       lookAhead $ anyWhitespaceParser <|> skip punctParser
-      return ([p], delim)
+      return $ [p]
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
@@ -223,6 +223,12 @@ punctParserS s = tokenPrim show nextPos testMatch
   testMatch t       = case t of
     Punctuation c -> if c `elem` s then Just c else Nothing
     _             -> Nothing
+
+-- | Consumes a sequence of punctuation defined by the provided string. Fails
+--   if it isn't matched (may consume input so should be used with try)
+punctParserSeq :: String -> TokenParser ()
+punctParserSeq (c:cx) = punctParserS [c] *> punctParserSeq cx
+punctParserSeq []     = return ()
 
 -- | Consumes one punctuation token unless the punctuation character is in s.
 --   Fails if the next token isn't punctuation or is in the exception list.
