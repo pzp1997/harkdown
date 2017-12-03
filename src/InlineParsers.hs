@@ -154,7 +154,7 @@ textTillDelim mEnd = do
   case mEnd of
     Nothing ->
       -- Done
-      (const [] <$> eof) <|>
+      (try $ const [] <$> eof) <|>
       -- Inline content
       (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> textTillDelim Nothing) <|>
       -- Consume another token as text and recurse
@@ -163,9 +163,9 @@ textTillDelim mEnd = do
       -- First see if end has been reached.
       (try $ end *> textTillDelim Nothing) <|>
       -- Inline content
-      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> textTillDelim Nothing) <|>
+      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> (textTillDelim  (Just end))) <|>
       -- Consume another token as text and recurse
-      ((:) <$> text <*> textTillDelim Nothing)
+      ((:) <$> text <*> (textTillDelim (Just end)))
       -- Fails if eof has been reached
   where
   inlineContent :: TokenParser (Maybe Char, Markdown)
@@ -180,7 +180,7 @@ textTillDelim mEnd = do
 -- | Unit test
 ttextTillDelim :: Test
 ttextTillDelim = TestList
-  [ runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
+  [ runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
