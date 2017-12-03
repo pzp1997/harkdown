@@ -167,21 +167,34 @@ textTillDelim mEnd = do
       -- Consume another token as text and recurse
       ((:) <$> text <*> (textTillDelim (Just end)))
       -- Fails if eof has been reached
-
-inlineContent :: TokenParser (Maybe Char, Markdown)
-inlineContent = do
-  (mC, delim) <- leftFlankingDelimLen 1 '*'
-  content <- textTillDelim (Just $ rightFlankingDelim delim)
-  return (mC, Emphasis content)
-consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
-consumeInlineContent (Just c, m)  = [Text [c], m]
-consumeInlineContent (Nothing, m) = [m]
+  where
+  inlineContent :: TokenParser (Maybe Char, Markdown)
+  inlineContent = do
+    (a, maxdelim) <- lookAhead (try $ leftFlankingDelimAll '*')
+    if even (length maxdelim)
+      then try strongEmphasisP <|> try emphasisP
+      else try emphasisP <|> try strongEmphasisP
+  consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
+  consumeInlineContent (Just c, m)  = [Text [c], m]
+  consumeInlineContent (Nothing, m) = [m]
+  emphasisP :: TokenParser (Maybe Char, Markdown)
+  emphasisP = do
+    (mC, delim) <- leftFlankingDelimLen 1 '*'
+    content <- textTillDelim (Just $ rightFlankingDelim delim)
+    return (mC, Emphasis content)
+  strongEmphasisP :: TokenParser (Maybe Char, Markdown)
+  strongEmphasisP = do
+    (mC, delim) <- leftFlankingDelimLen 2 '*'
+    content <- textTillDelim (Just $ rightFlankingDelim delim)
+    return (mC, StrongEmphasis content)
 
 -- | Unit test
 ttextTillDelim :: Test
 ttextTillDelim = TestList
   [ "Start of file" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
   , "Not start of file" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
+  , "Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello",Text " ",Text "world"]]
+  , "Em wrapping Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello",Text " ",Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
