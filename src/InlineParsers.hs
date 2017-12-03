@@ -12,6 +12,7 @@ import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
 import qualified Text.Parsec.Prim as Prim (many)
 import qualified Text.Parsec.Combinator as C
+import Test.HUnit
 
 import Data.Maybe (isJust)
 
@@ -132,6 +133,14 @@ leftFlankingDelimLen length c = do
       notFollowedBy punctParser
       return (pre, s)
 
+-- | Unit test
+tleftFlankingDelimLen :: Test
+tleftFlankingDelimLen = TestList
+  [ runParser (leftFlankingDelimLen 1 '*') () "" [StartOfFile,Punctuation '*',Word "hello"] ~?= Right (Nothing, "*")
+  , "Token remains" ~: runParser (leftFlankingDelimLen 1 '*' *> text) () "" [StartOfFile,Punctuation '*',Word "hello"] ~?= Right (Text "hello")
+  , "Leading whitespace" ~: runParser (leftFlankingDelimLen 1 '*') () "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
+  ]
+
 -- | Parses as much as possible until it encounters any valid left flanking
 --   delimiter or the provided specific right flanking delimiter. If a left
 --   flanking delimiter is encountered it attempts to recurse for that nested
@@ -175,10 +184,16 @@ textTillDelim mEnd = do
         case mC of
           Nothing -> do
             -- Don't need to consume anything extra
-            return $ (Emphasis inline) : rem
+            return $ Emphasis inline : rem
           Just c -> do
             -- Need to consume the extra token (whitespace, newline, punct)
-            return $ (Text [c]) : (Emphasis inline) : rem
+            return $ Text [c] : Emphasis inline : rem
+
+-- | Unit test
+ttextTillDelim :: Test
+ttextTillDelim = TestList
+  [ runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
+  ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
 --   It returns the token that belongs to the content being delimited
@@ -193,6 +208,7 @@ rightFlankingDelim delim = do
       -- Must be preceded by text or the parser fails
       prev <- textString
       punctParserSeq delim
+      -- Must not be followed by text
       return prev
     Just p  -> do
       -- preceded by punctuation p
@@ -200,6 +216,14 @@ rightFlankingDelim delim = do
       punctParserSeq delim
       eof <|> skip (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
       return $ [p]
+
+-- | Unit test
+trightFlankingDelim :: Test
+trightFlankingDelim = TestList
+  [ "Delim at eof" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*'] ~?= Right "hello"
+  , "Delim whitespace" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Whitespace ' '] ~?= Right "hello"
+  , "Delim followed by text" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Word "world"] ~?= Right "hello"
+  ]
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
