@@ -180,7 +180,8 @@ consumeInlineContent (Nothing, m) = [m]
 -- | Unit test
 ttextTillDelim :: Test
 ttextTillDelim = TestList
-  [ runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
+  [ "Start of file" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
+  , "Not start of file" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
