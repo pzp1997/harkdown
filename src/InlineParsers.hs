@@ -152,42 +152,30 @@ textTillDelim mEnd = do
   -- If an end delimiter was provided, attempt to apply it. The parser fails if
   -- eof is reached and there is a provided end parser.
   case mEnd of
-    Nothing -> do
-      -- TODO handle eof
-      isEOF <- optionMaybe eof
-      if isJust isEOF
-        then return []
-        else leftFlankOrText
-    Just end -> do
-      notFollowedBy eof -- We're in a case looking for a end sequence.
-      endFound <- optionMaybe (try end)
-      case endFound of
-        Just tok ->
-          -- Found the end!
-          return [Text tok]
-        Nothing  -> leftFlankOrText
+    Nothing ->
+      -- Done
+      (const [] <$> eof) <|>
+      -- Inline content
+      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> textTillDelim Nothing) <|>
+      -- Consume another token as text and recurse
+      ((:) <$> text <*> textTillDelim Nothing)
+    Just end ->
+      -- First see if end has been reached.
+      (try $ end *> textTillDelim Nothing) <|>
+      -- Inline content
+      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> textTillDelim Nothing) <|>
+      -- Consume another token as text and recurse
+      ((:) <$> text <*> textTillDelim Nothing)
+      -- Fails if eof has been reached
   where
-  leftFlankOrText :: TokenParser [Markdown]
-  leftFlankOrText = do
-    -- TODO replace this will any of the delimiters, not just *.
-    delimRes <- optionMaybe (try $ leftFlankingDelimLen 1 '*')
-
-    case delimRes of
-      Nothing             ->
-        -- No left flanking delimiter. Consume another token as text.
-        (:) <$> text <*> textTillDelim Nothing
-      Just (mC, delim) -> do -- Left flanking delimiter found
-        -- Content that will go into the delimited element
-        inline <- textTillDelim (Just $ rightFlankingDelim delim)
-        -- Everything after
-        rem    <- textTillDelim Nothing
-        case mC of
-          Nothing -> do
-            -- Don't need to consume anything extra
-            return $ Emphasis inline : rem
-          Just c -> do
-            -- Need to consume the extra token (whitespace, newline, punct)
-            return $ Text [c] : Emphasis inline : rem
+  inlineContent :: TokenParser (Maybe Char, Markdown)
+  inlineContent = do
+    (mC, delim) <- leftFlankingDelimLen 1 '*'
+    content <- textTillDelim (Just $ rightFlankingDelim delim)
+    return (mC, Emphasis content)
+  consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
+  consumeInlineContent (Just c, m)  = [Text [c], m]
+  consumeInlineContent (Nothing, m) = [m]
 
 -- | Unit test
 ttextTillDelim :: Test
