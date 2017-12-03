@@ -161,21 +161,21 @@ textTillDelim mEnd = do
       ((:) <$> text <*> textTillDelim Nothing)
     Just end ->
       -- First see if end has been reached.
-      (try $ end *> textTillDelim Nothing) <|>
+      (try $ liftA (\x -> [Text x]) end) <|>
       -- Inline content
       (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> (textTillDelim  (Just end))) <|>
       -- Consume another token as text and recurse
       ((:) <$> text <*> (textTillDelim (Just end)))
       -- Fails if eof has been reached
-  where
-  inlineContent :: TokenParser (Maybe Char, Markdown)
-  inlineContent = do
-    (mC, delim) <- leftFlankingDelimLen 1 '*'
-    content <- textTillDelim (Just $ rightFlankingDelim delim)
-    return (mC, Emphasis content)
-  consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
-  consumeInlineContent (Just c, _)  = [Text [c]]
-  consumeInlineContent (Nothing, _) = []
+
+inlineContent :: TokenParser (Maybe Char, Markdown)
+inlineContent = do
+  (mC, delim) <- leftFlankingDelimLen 1 '*'
+  content <- textTillDelim (Just $ rightFlankingDelim delim)
+  return (mC, Emphasis content)
+consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
+consumeInlineContent (Just c, m)  = [Text [c], m]
+consumeInlineContent (Nothing, m) = [m]
 
 -- | Unit test
 ttextTillDelim :: Test
