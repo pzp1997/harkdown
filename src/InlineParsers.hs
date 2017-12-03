@@ -174,8 +174,8 @@ textTillDelim mEnd = do
     content <- textTillDelim (Just $ rightFlankingDelim delim)
     return (mC, Emphasis content)
   consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
-  consumeInlineContent (Just c, m)  = [Text [c], m]
-  consumeInlineContent (Nothing, m) = [m]
+  consumeInlineContent (Just c, _)  = [Text [c]]
+  consumeInlineContent (Nothing, _) = []
 
 -- | Unit test
 ttextTillDelim :: Test
