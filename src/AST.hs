@@ -7,7 +7,7 @@ import Control.Applicative
 data Markdown
   = Emphasis [Markdown]
   | StrongEmphasis [Markdown]
-  | Italics Markdown
+  | Italics [Markdown]
   | Link String Markdown
   | Image String Markdown
   | Header Int Markdown
@@ -47,4 +47,22 @@ instance Arbitrary Markdown where
     genInlineList1 :: Gen [Markdown]
     genInlineList1 = liftA2 (:) genInline genInlineList
   shrink :: Markdown -> [Markdown]
-  shrink m = undefined
+  shrink (Emphasis l)       = map Emphasis (shrink l)
+  shrink (StrongEmphasis l) = map StrongEmphasis (shrink l)
+  shrink (Italics l)        = map Italics (shrink l)
+  -- For the following two, try both with shrunken link text and without
+  shrink (Link s m)         =
+    [Link s' m' | m' <- shrink m, s' <- shrink s] ++ map (Link s) (shrink m)
+  shrink (Image s m)        =
+    [Link s' m' | m' <- shrink m, s' <- shrink s] ++ map (Image s) (shrink m)
+  -- For headers, try both with the same header level and with lower
+  shrink (Header i m)       =
+    [Header i' m' | i' <- shrink i, m' <- shrink m] ++ map (Header i) (shrink m)
+  shrink (Paragraph m)      = map Paragraph $ shrink m
+  shrink (OrderedList l)    = map OrderedList $ shrink l
+  shrink (UnorderedList l)  = map UnorderedList $ shrink l
+  shrink (Text s)           = map Text (shrink s)
+  shrink (BlockQuote l)     = map BlockQuote $ shrink l
+  shrink (BlockLiteral m s) = [BlockLiteral m' s' | m' <- shrink m, s' <- shrink s]
+  shrink (InlineLiteral s)  = map InlineLiteral $ shrink s
+  shrink (HorizontalRule)   = []
