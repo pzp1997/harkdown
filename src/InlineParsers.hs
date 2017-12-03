@@ -181,11 +181,13 @@ textTillDelim mEnd = do
   emphasisP = do
     (mC, delim) <- leftFlankingDelimLen 1 '*'
     content <- textTillDelim (Just $ rightFlankingDelim delim)
+    guard (content /= [Text ""])
     return (mC, Emphasis content)
   strongEmphasisP :: TokenParser (Maybe Char, Markdown)
   strongEmphasisP = do
     (mC, delim) <- leftFlankingDelimLen 2 '*'
     content <- textTillDelim (Just $ rightFlankingDelim delim)
+    guard (content /= [Text ""])
     return (mC, StrongEmphasis content)
 
 -- | Unit test
@@ -194,7 +196,8 @@ ttextTillDelim = TestList
   [ "Start of file" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
   , "Not start of file" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
   , "Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello",Text " ",Text "world"]]
-  , "Em wrapping Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello",Text " ",Text "world"]]
+  , "***hello world***" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Emphasis [StrongEmphasis [Text "hello",Text " ",Text "world"],Text ""]]
+  , "***hello* world**" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Emphasis [Text "hello"], Text " ", Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
@@ -207,11 +210,10 @@ rightFlankingDelim delim = do
   case mPunct of
     Nothing -> do
       -- not preceded by punctuation
-      -- Must be preceded by text or the parser fails
-      prev <- textString
+      -- May be preceded by text or nothing.
+      prev <- optionMaybe textString
       punctParserSeq delim
-      -- Must not be followed by text
-      return prev
+      return $ maybe "" id prev
     Just p  -> do
       -- preceded by punctuation p
       -- Must be followed by whitespace or punctuation
@@ -225,6 +227,7 @@ trightFlankingDelim = TestList
   [ "Delim at eof" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*'] ~?= Right "hello"
   , "Delim whitespace" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Whitespace ' '] ~?= Right "hello"
   , "Delim followed by text" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Word "world"] ~?= Right "hello"
+  , "Delim preceded by nothing" ~: runParser (rightFlankingDelim "*") () "" [Punctuation '*',Word "world"] ~?= Right ""
   ]
 
 -- | Top level token parser for any kind of Markdown
@@ -344,10 +347,10 @@ code = try $ do
   atLeast_ 3 (punctParserS "`")
   -- Find out how many additional ticks the user gave
   addlTicks <- many (punctParserS "`")
-  label <- optionMaybe textString
+  label <- optionMaybe anyTextString
   newLine
   content <- manyTill
-    (textString <|> textWhitespace)
+    (anyTextString <|> textWhitespace)
     ((try $ count_ (3 + length addlTicks) (punctParserS "`")) <|> eof)
   -- Throw away whitespace on the same line
   C.optional $ Prim.many textWhitespace
@@ -370,12 +373,12 @@ autolink = undefined
 --   other possibilities have been exhausted.
 --   
 text :: TokenParser Markdown
-text = Text <$> textString
+text = Text <$> anyTextString
 
 -- | Consumes any token and produces the contained value as a string. Should
 --   generally be used in manyTill to consume until a stop condition is met.
-textString :: TokenParser String
-textString = tokenPrim show nextPos testMatch
+anyTextString :: TokenParser String
+anyTextString = tokenPrim show nextPos testMatch
   where
   nextPos   ps x xs = incSourceColumn ps 1
   testMatch t       = case t of
@@ -384,6 +387,15 @@ textString = tokenPrim show nextPos testMatch
     Word        w -> Just w
     NewLine       -> Just "\n"
     StartOfFile   -> Just ""
+
+-- | Consumes a word token and produces the contained value as a string.
+textString :: TokenParser String
+textString = tokenPrim show nextPos testMatch
+  where
+  nextPos   ps x xs = incSourceColumn ps 1
+  testMatch t       = case t of
+    Word w -> Just w
+    _      -> Nothing
 
 textWhitespace :: TokenParser String
 textWhitespace = tokenPrim show nextPos testMatch
