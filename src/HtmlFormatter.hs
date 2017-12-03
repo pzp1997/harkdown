@@ -28,8 +28,8 @@ htmlify (Image src mTitle md) =
   selfClosingTag "img" $ [("src", src), ("alt", concat $ extractText md)] ++
                          maybe [] (\title -> [("title", title)]) mTitle
 htmlify (Paragraph md)        = nl $ tag "p" [] $ htmlify md
-htmlify (OrderedList 1 items) = nlTag "ol" [] $ listItems False items
-htmlify (OrderedList n items) = nlTag "ol" [("start", show n)] $ listItems False items
+htmlify (OrderedList n tight items) = nlTag "ol" attr $ listItems tight items
+  where attr = if n == 1 then [] else [("start", show n)]
 htmlify (UnorderedList tight items) = nlTag "ul" [] $ listItems tight items
 htmlify (BlockQuote xs)       = nlTag "blockquote" [] $ foldMap htmlify xs
 htmlify (CodeBlock info s)    = nl $ tag "pre" [] $ tag "code" codeAttr $ text s
@@ -38,6 +38,7 @@ htmlify (Code s)     = tag "code" [] $ text s
 htmlify HorizontalRule        = nl $ selfClosingTag "hr" []
 htmlify SoftBreak             = char '\n'
 htmlify HardBreak             = selfClosingTag "br" []
+htmlify (Inline xs)           = foldMap htmlify xs
 
 tag :: String -> Attributes -> Doc -> Doc
 tag tagName attr contents = text ("<" ++ tagName ++ strOfAttr attr ++ ">") <>
@@ -60,25 +61,29 @@ listItems :: Bool -> [[Markdown]] -> Doc
 listItems tight xs
   | tight && all singleton xs = foldMap (nl . tag "li" [] . htmlify . tightContent) xs
   | otherwise                       = foldMap (nlTag "li" [] . foldMap htmlify) xs
-  where singleton [x] = True
+  where singleton [_] = True
         singleton _   = False
         tightContent [Paragraph md] = md
         tightContent [md]           = md
+        tightContent _              = undefined
 
 nl :: Doc -> Doc
 nl = (<> char '\n')
 
 extractText :: Markdown -> [String]
-extractText (Text s)              = [s]
-extractText (Bold md)             = extractText md
-extractText (Italics md)          = extractText md
-extractText (Header _ md)         = extractText md
-extractText (Link _ _ md)         = extractText md
-extractText (Image _ _ md)        = extractText md
-extractText (Paragraph md)        = extractText md
-extractText (OrderedList _ items) = concatMap (concatMap extractText) items
+extractText (Text s)                = [s]
+extractText (Bold md)               = extractText md
+extractText (Italics md)            = extractText md
+extractText (Header _ md)           = extractText md
+extractText (Link _ _ md)           = extractText md
+extractText (Image _ _ md)          = extractText md
+extractText (Paragraph md)          = extractText md
+extractText (OrderedList _ _ items) = concatMap (concatMap extractText) items
 extractText (UnorderedList _ items) = concatMap (concatMap extractText) items
-extractText (BlockQuote xs)       = concatMap extractText xs
-extractText (CodeBlock _ s)       = [s]
-extractText (Code s)              = [s]
-extractText HorizontalRule        = []
+extractText (BlockQuote xs)         = concatMap extractText xs
+extractText (CodeBlock _ s)         = [s]
+extractText (Code s)                = [s]
+extractText HorizontalRule          = []
+extractText SoftBreak               = []
+extractText HardBreak               = []
+extractText (Inline xs)             = concatMap extractText xs

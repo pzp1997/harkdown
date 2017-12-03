@@ -69,7 +69,7 @@ sepByInclusive p sep = liftA2 (:) p (concat <$> many (liftA2 twoList sep p)) <|>
 -- interleave :: Parser a -> Parser a -> Parser [a]
 -- interleave p1 p2 = many
 
--- exactly :: Int -> Parser a -> Parser [a]
+exactly :: Int -> Parser a -> Parser [a]
 exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
 
 

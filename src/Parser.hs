@@ -43,16 +43,22 @@ connector (PUnorderedList c tight xs : PUnorderedListItem c' x : rest)
 connector (PUnorderedList c _ xs : PBlankLine : rest@(PUnorderedListItem c' _ : _))
   | c == c' = connector $ PUnorderedList c False xs : rest
 connector (ul@PUnorderedList{} : PBlankLine : rest) = connector $ ul : rest
-connector (PUnorderedList c tight xs : rest) =
+connector (PUnorderedList _ tight xs : rest) =
   UnorderedList tight xs : connector rest
 
-connector (POrderedListItem n c x : rest) = connector $ POrderedList n c [mainP x] : rest
-connector (POrderedList n c xs : POrderedListItem _ c' x : rest)
-  | c == c' = connector $ POrderedList n c (mainP x : xs) : rest
-connector (POrderedList n c xs : rest) = OrderedList n xs : connector rest
+connector (POrderedListItem n c x : rest) =
+  connector $ POrderedList n c True [mainP x] : rest
+connector (POrderedList n c tight xs : POrderedListItem _ c' x : rest)
+  | c == c' = connector $ POrderedList n c tight (xs ++ [mainP x]) : rest
+connector (POrderedList n c _ xs : PBlankLine : rest@(POrderedListItem _ c' _ : _))
+  | c == c' = connector $ POrderedList n c False xs : rest
+connector (ol@POrderedList{} : PBlankLine : rest) = connector $ ol : rest
+connector (POrderedList n _ tight xs : rest) =
+  OrderedList n tight xs : connector rest
 
 connector (PBlockQuote s : PBlockQuote t : rest) = connector $ PBlockQuote (s ++ t) : rest
 connector (PBlockQuote s : rest) = BlockQuote (mainP s) : connector rest
+
 connector (PHeader level s : rest) = Header level (runInlineP s) : connector rest
 connector (PHorizontalRule : rest) = HorizontalRule : connector rest
 connector (PCodeBlock maybeInfo s : rest) = CodeBlock maybeInfo s : connector rest
@@ -76,7 +82,7 @@ inlineP = Text <$> many anyChar
 
 runInlineP :: String -> Markdown
 runInlineP s = case parse inlineP "" s of
-                 Left _  -> undefined -- TODO replace with something sensible
+                 Left  _ -> undefined -- TODO replace with something sensible
                  Right x -> x
 
 
@@ -99,7 +105,7 @@ blockquote,    orderedListItem, unorderedListItem :: Parser Partial
 
 thematicBreak = lineStart *> thematicMarker *> pure PHorizontalRule
 
-atxHeading = do lineStart
+atxHeading = do _ <- lineStart
                 hLevel <- atxMarker
                 content <- choice
                   [ some spaceChar *> manyTill (noneOf "\n\r")
@@ -119,9 +125,9 @@ fencedCode = do indentSize <- lineStart
                 content <- manyTill (atMost indentSize spaceChar *> line) $
                              try (close openFence) <|> eof
                 return $ PCodeBlock (trim infoString) $ concat content
-  where close f = do lineStart
+  where close f = do _ <- lineStart
                      closeFence <- fenceMarker
-                     eol
+                     _ <- eol
                      unless (f `isPrefixOf` closeFence) $
                        fail "closing code fence"
 
@@ -136,7 +142,8 @@ orderedListItem = do n <- lineStart
                      return $ POrderedListItem (read index) delim content
 
 unorderedListItem = do n <- lineStart
-                       (delim, m) <- unorderedListMarker
+                       delim <- unorderedListMarker
+                       m <- repeatBetweenN 1 4 spaceChar
                        content <- listItemContent $ n + m
                        return $ PUnorderedListItem delim content
 
@@ -148,7 +155,7 @@ linkRef = undefined
 
 ----------------------------  INLINE LEVEL PARSERS  ---------------------------
 
-code, italics, bold, link, image :: Parser Markdown
+code, italics, bold, link, image, autolink, text :: Parser Markdown
 
 code = undefined
 italics = undefined
@@ -164,14 +171,14 @@ interruptMarkers :: Parser ()
 interruptMarkers = choice $ (try . lookAhead) <$> [ thematicMarker
                                                   , () <$ atxMarker
                                                   , () <$ fenceMarker
-                                                  , () <$ orderedListMarker
-                                                  , () <$ unorderedListMarker
+                                                  , orderedListMarker *> repeatBetween 1 4 spaceChar *> nonWhiteSpaceChar *> return ()
+                                                  , unorderedListMarker *> repeatBetween 1 4 spaceChar *> nonWhiteSpaceChar *> return ()
                                                   , blockquoteMarker
                                                   , () <$ blankLine
                                                   ]
 
 thematicMarker :: Parser ()
-thematicMarker = choice (atLeast_ 3 . breakChar <$> "*-_") <* eolf <?> "thematic break"
+thematicMarker = choice (atLeast_ 3 . breakChar <$> "*-_") <* eol <?> "thematic break"
   where breakChar c = char c <* many spaceChar
 
 atxMarker :: Parser Int
@@ -183,14 +190,14 @@ fenceMarker = choice (atLeast 3 . char <$> "`~") <?> "fenced code block"
 orderedListMarker :: Parser (String, Char)
 orderedListMarker = liftA2 (,) (repeatBetween 1 9 digit) (choice $ char <$> ".)") <?> "ordered list"
 
-unorderedListMarker :: Parser (Char, Int)
-unorderedListMarker = liftA2 (,) (choice $ char <$> "-+*") (repeatBetweenN 1 4 spaceChar) <?> "unordered list"
+unorderedListMarker :: Parser Char
+unorderedListMarker = choice (char <$> "-+*") <?> "unordered list"
 
 blockquoteMarker :: Parser ()
 blockquoteMarker = (char '>' *> optional (char ' ') *> return ()) <?> "blockquote"
 
 setextMarker :: Parser Int
-setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eolf
+setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eol
 
 -------------------------------  HELPER PARSERS  ------------------------------
 
@@ -208,8 +215,8 @@ continutation w = manyTillEnd anyChar $ try stop <|> "" <$ eof
 
 listItemContent :: Int -> Parser String
 listItemContent w = do first <- continutation w
-                       rest <- many $ liftA2 (\xs x -> concat $ xs ++ [x])
-                                 (try $ some $ try blankLine)
+                       rest <- many $ try $ liftA2 (\xs x -> concat $ xs ++ [x])
+                                 (some $ try blankLine)
                                  (atLeast (w + 1) spaceChar *> continutation w)
                        return . concat $ first : rest
   --
@@ -224,19 +231,14 @@ eol =   string "\n"
     <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
     <?> "end of line"
 
-eolf :: Parser String
-eolf = eol <|> "" <$ eof
-
 line :: Parser String
 line = manyTillEnd anyChar eol
 
 blankLine :: Parser String
 blankLine = manyTillEnd (oneOf " \t\v") eol
 
--- nonBlankLine :: Parser String
--- nonBlankLine = do rawLine <- line
---                   if all isSpace rawLine then fail "non-blank line"
---                   else return rawLine
+nonWhiteSpaceChar :: Parser Char
+nonWhiteSpaceChar = satisfy (not . isSpace)
 
 lineStart :: Parser Int
 lineStart = atMostN 3 spaceChar
@@ -245,8 +247,9 @@ lineStart = atMostN 3 spaceChar
 linkLabel :: Parser String
 linkLabel = between (char '[') (char ']') contentP
   where contentP = do ref <- repeatBetween 1 999 (noneOf "[]")
-                      (if all isSpace ref then fail "valid link ref"
-                       else return (condenseSpace ref))
+                      if all isSpace ref
+                        then fail "valid link ref"
+                        else return (condenseSpace ref)
 
 
 -------------------------------  STRING HELPERS  ------------------------------
@@ -273,4 +276,4 @@ trim = dropWhileRight isSpace . dropWhile isSpace
 dropWhileRight :: (a -> Bool) -> [a] -> [a]
 dropWhileRight p = fromMaybe [] . foldr combine Nothing
   where combine x Nothing = if p x then Nothing else Just [x]
-        combine x xs      = (x:) <$> xs
+        combine x xs      = (x : ) <$> xs

@@ -7,7 +7,7 @@ data Markdown
   | Image String (Maybe String) Markdown
   | Header Int Markdown
   | Paragraph Markdown
-  | OrderedList Int [[Markdown]]
+  | OrderedList Int Bool [[Markdown]]
   | UnorderedList Bool [[Markdown]]
   -- | OrderedList Int Bool [[Markdown]]
   -- | UnorderedList Bool [[Markdown]]
@@ -25,7 +25,7 @@ data Partial
   = PHeader Int String
   | POrderedListItem Int Char String
   | PUnorderedListItem Char String
-  | POrderedList Int Char [[Markdown]]
+  | POrderedList Int Char Bool [[Markdown]]
   | PUnorderedList Char Bool [[Markdown]]
   | PBlockQuote String
   | PCodeBlock String String
