@@ -51,19 +51,14 @@ data MdToken
 
 -- | Parser that parses the maximal span of whitespace characters
 pwhitespace :: Parser MdToken
-pwhitespace = Whitespace <$> whitespace
-
--- | Consumes whitespace.
-whitespace :: Parser Char
--- All characters considered whitespace by Markdown excluding newlines.
-whitespace = oneOf "\t\f "
+pwhitespace = Whitespace <$> oneOf "\t\f "
 
 -- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
 plinebreak :: Parser MdToken
 plinebreak = do
   -- needs to be in try so that the leading \r isn't consumed on failure.
-  (try endOfLine) <|> char '\r'
-  return $ NewLine
+  try endOfLine <|> char '\r'
+  return NewLine
 
 -- | Parser that parses a single punctuation character.
 ppunctuation :: Parser MdToken
@@ -148,24 +143,24 @@ tleftFlankingDelimLen = TestList
 --   resumes looking for the matching right flanking delimiter specified. If no
 --   right flanking delimiter is provided it consumes until the end of file.
 textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
-textTillDelim mEnd = do
+textTillDelim mEnd =
   -- If an end delimiter was provided, attempt to apply it. The parser fails if
   -- eof is reached and there is a provided end parser.
   case mEnd of
     Nothing ->
       -- Done
-      (try $ const [] <$> eof) <|>
+      try ("" <$ eof) <|>
       -- Inline content
-      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> textTillDelim Nothing) <|>
+      try (liftA2 (++) (consumeInlineContent <$> inlineContent) (textTillDelim Nothing)) <|>
       -- Consume another token as text and recurse
-      ((:) <$> text <*> textTillDelim Nothing)
+      liftA2 (:) text (textTillDelim Nothing)
     Just end ->
       -- First see if end has been reached.
       (try $ liftA (\x -> [Text x]) end) <|>
       -- Inline content
-      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> (textTillDelim  (Just end))) <|>
+      try (liftA2 (++) (consumeInlineContent <$> inlineContent) (textTillDelim mEnd)) <|>
       -- Consume another token as text and recurse
-      ((:) <$> text <*> (textTillDelim (Just end)))
+      liftA2 (:) text (textTillDelim mEnd)
       -- Fails if eof has been reached
   where
   inlineContent :: TokenParser (Maybe Char, Markdown)
@@ -219,7 +214,7 @@ rightFlankingDelim delim = do
       -- Must be followed by whitespace or punctuation
       punctParserSeq delim
       eof <|> skip (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
-      return $ [p]
+      return [p]
 
 -- | Unit test
 trightFlankingDelim :: Test
@@ -258,8 +253,7 @@ punctParserS s = tokenPrim show nextPos testMatch
 -- | Consumes a sequence of punctuation defined by the provided string. Fails
 --   if it isn't matched (may consume input so should be used with try)
 punctParserSeq :: String -> TokenParser ()
-punctParserSeq (c:cx) = punctParserS [c] *> punctParserSeq cx
-punctParserSeq []     = return ()
+punctParserSeq = foldr (\x acc -> punctParserS [x] *> acc) (return ())
 
 -- | Consumes one punctuation token unless the punctuation character is in s.
 --   Fails if the next token isn't punctuation or is in the exception list.
@@ -311,11 +305,11 @@ startOfFileParser = tokenPrim show nextPos testMatch
 --   discarded.
 runEscapes :: [MdToken] -> [MdToken]
 -- In the future we may want to pull this into the original tokenizer
-runEscapes (Punctuation '\\' : (Punctuation x) : xs)
+runEscapes (Punctuation '\\' : Punctuation x : xs)
   -- Escapable punctuation
-  | x `elem` "*\\_[]<>()\"\'" = (Word [x]) : runEscapes xs
+  | x `elem` "*\\_[]<>()\"\'" = Word [x] : runEscapes xs
   -- Not escapable punctuation
-  | otherwise                 = (Word "\\") : runEscapes (Punctuation x : xs)
+  | otherwise                 = Word "\\" : runEscapes (Punctuation x : xs)
 runEscapes (x:xs) = x : runEscapes xs
 runEscapes []     = []
 
@@ -355,7 +349,7 @@ code = try $ do
   -- Throw away whitespace on the same line
   C.optional $ Prim.many textWhitespace
   C.optional newLine
-  return $ BlockLiteral label (foldr (++) "" content)
+  return $ BlockLiteral label (concat content)
 
 italics :: TokenParser Markdown
 italics = undefined
@@ -371,7 +365,7 @@ autolink = undefined
 
 -- | Parser that consumes any token as text. Should only be used after all
 --   other possibilities have been exhausted.
---   
+--
 text :: TokenParser Markdown
 text = Text <$> anyTextString
 
