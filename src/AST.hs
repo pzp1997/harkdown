@@ -1,3 +1,4 @@
+module AST where
 {-# LANGUAGE InstanceSigs #-}
 
 module AST (Markdown(..)) where
@@ -5,21 +6,50 @@ import Test.QuickCheck
 import Control.Applicative
 
 data Markdown
-  = Emphasis [Markdown]
-  | StrongEmphasis [Markdown]
-  | Italics [Markdown]
-  | Link String Markdown
-  | Image String Markdown
+  = Bold Markdown
+  | Italics Markdown
+  | Link String (Maybe String) Markdown
+  | Image String (Maybe String) Markdown
   | Header Int Markdown
   | Paragraph Markdown
-  | OrderedList [Markdown]
-  | UnorderedList [Markdown]
+  | OrderedList Int Bool [[Markdown]]
+  | UnorderedList Bool [[Markdown]]
+  -- | OrderedList Int Bool [[Markdown]]
+  -- | UnorderedList Bool [[Markdown]]
   | Text String
   | BlockQuote [Markdown]
-  | BlockLiteral (Maybe String) String
-  | InlineLiteral String
+  | CodeBlock String String
+  | Code String
   | HorizontalRule
+  | SoftBreak
+  | HardBreak
+  | Inline [Markdown]
   deriving (Eq, Show)
+
+data Partial
+  = PHeader Int String
+  | POrderedListItem Int Char String
+  | PUnorderedListItem Char String
+  | POrderedList Int Char Bool [[Markdown]]
+  | PUnorderedList Char Bool [[Markdown]]
+  | PBlockQuote String
+  | PCodeBlock String String
+  | PHorizontalRule
+  | PParagraph String
+  | PBlankLine
+  deriving (Eq, Show)
+
+-- data Partial
+--   = Content String
+--   | PCodeBlock (Maybe String) String
+--   | PThematic
+--   | Atx Int String
+--   | Setext Boolean
+--   | OLItem Int String
+--   | ULItem String
+--   | BQItem String
+--
+--   | Content String
 
 instance Arbitrary Markdown where
   arbitrary :: Gen Markdown
