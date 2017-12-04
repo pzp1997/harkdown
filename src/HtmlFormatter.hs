@@ -17,8 +17,8 @@ renderHtml = render . foldMap htmlify
 
 htmlify :: Markdown -> Doc
 htmlify (Text s)              = text s
-htmlify (Bold md)             = tag "strong" [] $ htmlify md
-htmlify (Italics md)          = tag "em" [] $ htmlify md
+htmlify (Bold md)             = tag "strong" [] $ foldMap htmlify md
+htmlify (Italics md)          = tag "em" [] $ foldMap htmlify md
 htmlify (Header level md)     = nl $ tag ("h" ++ show level) [] $ htmlify md
 htmlify (Link href mTitle md) = tag "a" attr $ htmlify md
   where attr = case mTitle of
@@ -38,7 +38,6 @@ htmlify (Code s)     = tag "code" [] $ text s
 htmlify HorizontalRule        = nl $ selfClosingTag "hr" []
 htmlify SoftBreak             = char '\n'
 htmlify HardBreak             = selfClosingTag "br" []
-htmlify (Inline xs)           = foldMap htmlify xs
 
 tag :: String -> Attributes -> Doc -> Doc
 tag tagName attr contents = text ("<" ++ tagName ++ strOfAttr attr ++ ">") <>
@@ -72,8 +71,8 @@ nl = (<> char '\n')
 
 extractText :: Markdown -> [String]
 extractText (Text s)                = [s]
-extractText (Bold md)               = extractText md
-extractText (Italics md)            = extractText md
+extractText (Bold md)               = concatMap extractText md
+extractText (Italics md)            = concatMap extractText md
 extractText (Header _ md)           = extractText md
 extractText (Link _ _ md)           = extractText md
 extractText (Image _ _ md)          = extractText md
@@ -86,4 +85,3 @@ extractText (Code s)                = [s]
 extractText HorizontalRule          = []
 extractText SoftBreak               = []
 extractText HardBreak               = []
-extractText (Inline xs)             = concatMap extractText xs

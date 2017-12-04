@@ -226,11 +226,6 @@ listItemContent w = do first <- continutation w
 
 ----------------------------  DEFINITIONAL PARSERS  ---------------------------
 
-eol :: Parser String
-eol =   string "\n"
-    <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
-    <?> "end of line"
-
 line :: Parser String
 line = manyTillEnd anyChar eol
 

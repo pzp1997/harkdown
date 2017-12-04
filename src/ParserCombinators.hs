@@ -3,18 +3,25 @@ module ParserCombinators where
 import Control.Applicative
 import Data.Char (isSpace)
 
-import Text.Parsec (satisfy, char, skipMany, between
-  , notFollowedBy, manyTill, try, lookAhead)
-import Text.Parsec.Combinator
+import Text.Parsec hiding (many, optional, (<|>))
+-- import Text.Parsec.Combinator
 import Text.Parsec.String (Parser)
-import Text.Parsec.Prim hiding (many, (<|>))
+-- import Text.Parsec.Prim hiding (many, (<|>))
+
+eol :: Parser String
+eol =   string "\n"
+    <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
+    <?> "end of line"
 
 atLeast :: Int -> Parser a -> Parser [a]
 atLeast n p
   | n > 0     = liftA2 (:) p $ atLeast (n - 1) p
   | otherwise = many p
 
-atLeast_ :: Int -> Parser a -> Parser ()
+atLeastN :: Int -> Parser a -> Parser Int
+atLeastN n = fmap length . atLeast n
+
+atLeast_ :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m ()
 atLeast_ n p
   | n > 0     = p *> atLeast_ (n - 1) p
   | otherwise = skipMany p
@@ -24,10 +31,6 @@ atMost n p
   | n >= 0    = liftA2 (:) p (atMost (n - 1) p) <|> return []
   | otherwise = fail "too many"
 
-atLeast_ :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m ()
-atLeast_ n p
-  | n > 0     = p *> atLeast_ (n - 1) p
-  | otherwise = skipMany p
 atMostN :: Int -> Parser a -> Parser Int
 atMostN n = fmap length . atMost n
 
@@ -88,9 +91,6 @@ sepByInclusive p sep = liftA2 (:) p (concat <$> many (liftA2 twoList sep p)) <|>
 
 -- interleave :: Parser a -> Parser a -> Parser [a]
 -- interleave p1 p2 = many
-
-exactly :: Int -> Parser a -> Parser [a]
-exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
 
 
 someTill :: Parser a -> Parser b -> Parser [a]
