@@ -14,6 +14,7 @@ import Text.Parsec.String (Parser)
 
 import AST
 import ParserCombinators
+import InlineParsers (runInlineP)
 
 -- parseMarkdown input = case parse (many atxHeading) "" input of
 --                         Left  _  -> []
@@ -37,9 +38,9 @@ mainP s = case parse (connector <$> blockP) "" (newlineTerminate s) of
 connector :: [Partial] -> [Markdown]
 
 connector (PUnorderedListItem c x : rest) =
-  connector $ PUnorderedList c True [mainP x] : rest
+  connector $ PUnorderedList c True [Many $ mainP x] : rest
 connector (PUnorderedList c tight xs : PUnorderedListItem c' x : rest)
-  | c == c' = connector $ PUnorderedList c tight (xs ++ [mainP x]) : rest
+  | c == c' = connector $ PUnorderedList c tight (xs ++ [Many $ mainP x]) : rest
 connector (PUnorderedList c _ xs : PBlankLine : rest@(PUnorderedListItem c' _ : _))
   | c == c' = connector $ PUnorderedList c False xs : rest
 connector (ul@PUnorderedList{} : PBlankLine : rest) = connector $ ul : rest
@@ -47,9 +48,9 @@ connector (PUnorderedList _ tight xs : rest) =
   UnorderedList tight xs : connector rest
 
 connector (POrderedListItem n c x : rest) =
-  connector $ POrderedList n c True [mainP x] : rest
+  connector $ POrderedList n c True [Many $ mainP x] : rest
 connector (POrderedList n c tight xs : POrderedListItem _ c' x : rest)
-  | c == c' = connector $ POrderedList n c tight (xs ++ [mainP x]) : rest
+  | c == c' = connector $ POrderedList n c tight (xs ++ [Many $ mainP x]) : rest
 connector (POrderedList n c _ xs : PBlankLine : rest@(POrderedListItem _ c' _ : _))
   | c == c' = connector $ POrderedList n c False xs : rest
 connector (ol@POrderedList{} : PBlankLine : rest) = connector $ ol : rest
@@ -57,12 +58,12 @@ connector (POrderedList n _ tight xs : rest) =
   OrderedList n tight xs : connector rest
 
 connector (PBlockQuote s : PBlockQuote t : rest) = connector $ PBlockQuote (s ++ t) : rest
-connector (PBlockQuote s : rest) = BlockQuote (mainP s) : connector rest
+connector (PBlockQuote s : rest) = BlockQuote (Many $ mainP s) : connector rest
 
-connector (PHeader level s : rest) = Header level (runInlineP s) : connector rest
+connector (PHeader level s : rest) = Header level (Many $ runInlineP s) : connector rest
 connector (PHorizontalRule : rest) = HorizontalRule : connector rest
 connector (PCodeBlock maybeInfo s : rest) = CodeBlock maybeInfo s : connector rest
-connector (PParagraph s : rest) = Paragraph (runInlineP $ trim s) : connector rest
+connector (PParagraph s : rest) = Paragraph (Many $ runInlineP $ trim s) : connector rest
 connector (PBlankLine : rest) = connector rest
 connector [] = []
 
@@ -77,13 +78,13 @@ blockP = manyTill (choice $ try <$> [ thematicBreak
                                     , paragraph
                                     ]) eof
 
-inlineP :: Parser Markdown
-inlineP = Text <$> many anyChar
+-- inlineP :: Parser Markdown
+-- inlineP = Text <$> many anyChar
 
-runInlineP :: String -> Markdown
-runInlineP s = case parse inlineP "" s of
-                 Left  _ -> undefined -- TODO replace with something sensible
-                 Right x -> x
+-- runInlineP :: String -> Markdown
+-- runInlineP s = case parse inlineP "" s of
+--                  Left  _ -> undefined -- TODO replace with something sensible
+--                  Right x -> x
 
 
 -- inlineP = return . Text

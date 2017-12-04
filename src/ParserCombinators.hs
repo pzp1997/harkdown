@@ -94,4 +94,4 @@ sepByInclusive p sep = liftA2 (:) p (concat <$> many (liftA2 twoList sep p)) <|>
 
 
 someTill :: Parser a -> Parser b -> Parser [a]
-someTill p sep = liftA2 (:) p (manyTill p sep)
+someTill p end = liftA2 (:) p (manyTill p end)

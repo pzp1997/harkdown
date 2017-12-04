@@ -1,7 +1,4 @@
-{-# LANGUAGE InstanceSigs #-}
-
--- | Module to parse blocks of text into the Markdown AST.
-module InlineParsers (buildAST) where
+module InlineParsers where
 
 import Control.Applicative
 import Control.Monad
@@ -20,14 +17,6 @@ import ParserCombinators
 -- | Utility to throw away the result of the parser. Used to make combinators happy.
 skip :: Stream s m t => ParsecT s u m a -> ParsecT s u m ()
 skip = (() <$)
-
--- | Variant of manyTill that must match at least once.
-many1Till :: Stream s m t =>
-  ParsecT s u m a -> ParsecT s u m end -> ParsecT s u m [a]
-many1Till p end = do
-  res <- manyTill p end
-  guard (not $ null res)
-  return res
 
 -----------------------------------------
 
@@ -62,8 +51,7 @@ punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 -- | Parser that parses the maximal span of characters that aren't whitespace
 --   or punctuation.
 pword :: Parser MdToken
-pword = Word <$> many1Till
-  anyChar
+pword = Word <$> someTill anyChar
   (lookAhead $ skip (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
@@ -136,22 +124,13 @@ textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
 textTillDelim mEnd =
   -- If an end delimiter was provided, attempt to apply it. The parser fails if
   -- eof is reached and there is a provided end parser.
-  case mEnd of
-    Nothing ->
-      -- Done
-      try ([Text ""] <$ eof) <|>
-      -- Inline content
-      try (liftA2 (++) (consumeInlineContent <$> inlineContent) (textTillDelim Nothing)) <|>
-      -- Consume another token as text and recurse
-      liftA2 (:) text (textTillDelim Nothing)
-    Just end ->
-      -- First see if end has been reached.
-      try ((pure . Text) <$> end) <|>
-      -- Inline content
-      try (liftA2 (++) (consumeInlineContent <$> inlineContent) (textTillDelim mEnd)) <|>
-      -- Consume another token as text and recurse
-      liftA2 (:) text (textTillDelim mEnd)
-      -- Fails if eof has been reached
+  -- First see if end has been reached.
+  try ((pure . Text) <$> fromMaybe ("" <$ eof) mEnd) <|>
+  -- Inline content
+  try (liftA2 (++) (consumeInlineContent <$> inlineContent) (textTillDelim mEnd)) <|>
+  -- Consume another token as text and recurse
+  liftA2 (:) text (textTillDelim mEnd)
+  -- Fails if eof has been reached
   where
   inlineContent :: TokenParser (Maybe Char, Markdown)
   inlineContent = do
@@ -167,22 +146,22 @@ textTillDelim mEnd =
     (mC, delim) <- leftFlankingDelimLen 1 '*'
     content <- textTillDelim (Just $ rightFlankingDelim delim)
     guard (content /= [Text ""])
-    return (mC, Italics content)
+    return (mC, Italics $ Many content)
   strongEmphasisP :: TokenParser (Maybe Char, Markdown)
   strongEmphasisP = do
     (mC, delim) <- leftFlankingDelimLen 2 '*'
     content <- textTillDelim (Just $ rightFlankingDelim delim)
     guard (content /= [Text ""])
-    return (mC, Bold content)
+    return (mC, Bold $ Many content)
 
 -- | Unit test
 ttextTillDelim :: Test
 ttextTillDelim = TestList
-  [ "Start of file" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics [Text "hello",Text " ",Text "world"]]
-  , "Not start of file" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics [Text "hello",Text " ",Text "world"]]
-  , "Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold [Text "hello",Text " ",Text "world"]]
-  , "***hello world***" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Italics [Bold [Text "hello",Text " ",Text "world"],Text ""]]
-  , "***hello* world**" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold [Italics [Text "hello"], Text " ", Text "world"]]
+  [ "Start of file" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "hello",Text " ",Text "world"]]
+  , "Not start of file" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "hello",Text " ",Text "world"]]
+  , "Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello",Text " ",Text "world"]]
+  , "***hello world***" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello",Text " ",Text "world"],Text ""]]
+  , "***hello* world**" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Italics $ Text "hello", Text " ", Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
@@ -218,7 +197,6 @@ trightFlankingDelim = TestList
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
 inlineMarkdown = textTillDelim Nothing
-
 
 -- Utilities for parsing individual types.
 -- | Consumes one punctuation token. Fails if the next token isn't punctuation.
@@ -312,10 +290,10 @@ preBlock = undefined
 -- | Create a Markdown AST from the input string. Errors if the string can't be
 --   fully consumed to create valid Markdown.
 
-buildAST :: String -> [Markdown]
-buildAST s = case parseOut of
-  (Right result) -> result
-  (Left err)     -> error $ show err
+runInlineP :: String -> [Markdown]
+runInlineP s = case parseOut of
+                 (Right result) -> result
+                 (Left err)     -> error $ show err
   where parseOut = do tok <- tokenize s
                       runParser inlineMarkdown () "" $ runEscapes tok
 
@@ -332,6 +310,9 @@ buildAST s = case parseOut of
 --   C.optional $ Prim.many textWhitespace
 --   C.optional newLine
 --   return $ CodeBlock label (concat content)
+
+code :: TokenParser Markdown
+code = undefined
 
 italics :: TokenParser Markdown
 italics = undefined
