@@ -12,21 +12,18 @@ import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
 import qualified Text.Parsec.Prim as Prim (many)
 import qualified Text.Parsec.Combinator as C
+
+
 import Test.HUnit
 
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
+import qualified Data.Map.Strict as Map
 
 import AST
 import ParserCombinators
 
 
 -- Additional combinators --------------
-
--- | Utility to throw away the result of the parser. Used to make combinators happy.
-skip :: Stream s m t => ParsecT s u m a -> ParsecT s u m ()
-skip p = do
-  p
-  return ()
 
 -- | Variant of manyTill that must match at least once.
 many1Till :: Stream s m t =>
@@ -46,7 +43,6 @@ data MdToken
   | NewLine
   | Punctuation Char
   | Word String
-  | StartOfFile
   deriving (Show, Eq)
 
 -- | Parser that parses the maximal span of whitespace characters
@@ -79,7 +75,7 @@ punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 pword :: Parser MdToken
 pword = Word <$> many1Till
   anyChar
-  (lookAhead $ skip (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
+  (lookAhead $ void (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
@@ -89,7 +85,7 @@ tokenizer = do
     , pwhitespace
     , pword
     ]
-  return (StartOfFile : tokens)
+  return tokens
 
 -- | Runs the tokenizer on the provided input.
 tokenize :: String -> Either ParseError [MdToken]
@@ -102,137 +98,163 @@ tokenize = runParser tokenizer () ""
 -- | Parser that works over the MdTokens defined above instead of Strings.
 type TokenParser a = ParsecT [MdToken] () Identity a
 
--- | Parser that recognizes a left flanking delimiter run of the supplied
---   character. It returns the pair of the maybe character consumed to
---   delineate a left flanking delimiter and the string used as the delimiter.
-leftFlankingDelimAll :: Char -> TokenParser (Maybe Char, String)
-leftFlankingDelimAll c = do
-  pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
-  sof <- optionMaybe startOfFileParser
-  s <- many1 $ punctParserS [c]-- delimiter
-  notFollowedBy (whitespaceParser <|> newLineParser)
-  if isJust pre || isJust sof
-    then return (pre, s)
-    else do
-      notFollowedBy punctParser
-      return (pre, s)
+-- | Utility that merges all text fields
+simplify :: [Markdown] -> [Markdown]
+simplify (Text "":xs)           = simplify xs
+simplify (Text x:Text y:xs)     = simplify $ Text (x ++ y) : xs
+simplify (Emphasis l:xs)        = Emphasis (simplify l) : simplify xs
+simplify (StrongEmphasis l:xs)  = StrongEmphasis (simplify l) : simplify xs
+simplify ((x@_):xs)             = x : simplify xs
+simplify []                     = []
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
---   character. It returns the pair of the maybe char consumed to
---   delineate a left flanking delimiter (whitespace or punctuation) and the
---   string used as the delimiter.
-leftFlankingDelimLen :: Int -> Char -> TokenParser (Maybe Char, String)
-leftFlankingDelimLen length c = do
-  pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
-  sof <- optionMaybe startOfFileParser
-  s <- count length $ punctParserS [c]-- delimiter
-  notFollowedBy (whitespaceParser <|> newLineParser)
-  if isJust pre || isJust sof
-    then return (pre, s)
+--   character and using the supplied parser to recognize the delimiter. It
+--   returns the pair of the maybe character consumed to delineate a left
+--   flanking delimiter and the string used as the delimiter.
+--   
+--   If startOfDelimited is True, it's assumed that it is preceded by
+--   punctuation or whitespace. Otherwise no such assumption can be made,
+--   so such a token. must be directly consumed to be considered encountered.
+leftFlankingDelimP :: Bool -> Char -> TokenParser String ->
+    TokenParser (Maybe Char, String)
+leftFlankingDelimP startOfDelimited c delim =
+  if startOfDelimited
+    then
+      -- Only need to verify that it isn't followed by whitespace
+      ((,) <$> pure Nothing <*> delim <*
+        notFollowedBy (whitespaceParser <|> newLineParser))
     else do
-      notFollowedBy punctParser
-      return (pre, s)
+      -- Must check for full rules.
+      pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
+      s <- delim -- delimiter
+      -- (a) May not be followed by whitespace
+      notFollowedBy (whitespaceParser <|> newLineParser)
+      if isJust pre
+        -- (b) Preceded by whitespace or punctuation
+        then return (pre, s)
+        -- (b) Not followed by punctuation
+        else do
+          notFollowedBy (punctParser)
+          return (pre, s)
+-- | Left flanking delimiter of a specified length and char
+leftFlankingDelim :: Bool -> String -> TokenParser (Maybe Char, String)
+leftFlankingDelim startOfDelimited delim =
+  leftFlankingDelimP startOfDelimited (head delim) (punctParserSeq delim)
+-- | Left flanking delimiter of maximal length using the supplied char
+leftFlankingDelimAll :: Bool -> Char -> TokenParser (Maybe Char, String)
+leftFlankingDelimAll startOfDelimited c =
+  leftFlankingDelimP startOfDelimited c (many1 $ punctParserS [c])
+
+-- A left-flanking delimiter run is a delimiter run that is (a) not followed by Unicode whitespace, and (b) not followed by a punctuation character, or preceded by Unicode whitespace or a punctuation character. For purposes of this definition, the beginning and the end of the line count as Unicode whitespace.
 
 -- | Unit test
-tleftFlankingDelimLen :: Test
-tleftFlankingDelimLen = TestList
-  [ runParser (leftFlankingDelimLen 1 '*') () "" [StartOfFile,Punctuation '*',Word "hello"] ~?= Right (Nothing, "*")
-  , "Token remains" ~: runParser (leftFlankingDelimLen 1 '*' *> text) () "" [StartOfFile,Punctuation '*',Word "hello"] ~?= Right (Text "hello")
-  , "Leading whitespace" ~: runParser (leftFlankingDelimLen 1 '*') () "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
+tleftFlankingDelimP :: Test
+tleftFlankingDelimP = TestList
+  [ "*hello" ~:
+      runParser (leftFlankingDelim True "*") () "" [Punctuation '*',Word "hello"] ~?= Right (Nothing, "*")
+  , "Token remains" ~:
+      runParser (leftFlankingDelim True "*" *> text) () "" [Punctuation '*',Word "hello"] ~?= Right (Text "hello")
+  , "Leading whitespace" ~:
+      runParser (leftFlankingDelim False "*") () "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
   ]
 
--- | Parses as much as possible until it encounters any valid left flanking
---   delimiter or the provided specific right flanking delimiter. If a left
---   flanking delimiter is encountered it attempts to recurse for that nested
---   markdown document. On success or failure of the recursed parser it then
---   resumes looking for the matching right flanking delimiter specified. If no
---   right flanking delimiter is provided it consumes until the end of file.
-textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
-textTillDelim mEnd = do
-  -- If an end delimiter was provided, attempt to apply it. The parser fails if
-  -- eof is reached and there is a provided end parser.
+-- | Parses text and inline markdown until the matching right flanking
+--   delimiter is encountered.
+textTillDelim :: Bool -> Maybe (TokenParser String) -> TokenParser [Markdown]
+textTillDelim isStartOfDelimited mEnd = simplify <$> do
   case mEnd of
+    -- No end delimiter provided.
     Nothing ->
       -- Done
-      (try $ const [] <$> eof) <|>
+      (try eof *> pure []) <|>
       -- Inline content
-      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> textTillDelim Nothing) <|>
+      (try $ (++) <$> inlineContent True <*> textTillDelim False Nothing) <|>
       -- Consume another token as text and recurse
-      ((:) <$> text <*> textTillDelim Nothing)
+      (try $ (:) <$> text <*> textTillDelim False Nothing)
+
+    -- end delimiter provided.
     Just end ->
       -- First see if end has been reached.
       (try $ liftA (\x -> [Text x]) end) <|>
       -- Inline content
-      (try $ (++) <$> (consumeInlineContent <$> inlineContent) <*> (textTillDelim  (Just end))) <|>
+      (try $ (++) <$> inlineContent isStartOfDelimited <*> textTillDelim False mEnd) <|>
       -- Consume another token as text and recurse
-      ((:) <$> text <*> (textTillDelim (Just end)))
+      (try $ (:) <$> text <*> textTillDelim False mEnd)
       -- Fails if eof has been reached
   where
-  inlineContent :: TokenParser (Maybe Char, Markdown)
-  inlineContent = do
-    (a, maxdelim) <- lookAhead (try $ leftFlankingDelimAll '*')
+  -- | Parses a block of inline content, delimited by * or **. If the length of
+  --   the delimiter is odd it first tries * and then **, and if even it tries
+  --   in opposite order.
+  inlineContent :: Bool -> TokenParser [Markdown]
+  inlineContent isStartOfDelimited = consumeInlineContent <$> do
+    (a, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
+    let emphasis = emphasisP isStartOfDelimited "*"
+        strongemphasis = emphasisP isStartOfDelimited "**"
     if even (length maxdelim)
-      then try strongEmphasisP <|> try emphasisP
-      else try emphasisP <|> try strongEmphasisP
-  consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
-  consumeInlineContent (Just c, m)  = [Text [c], m]
-  consumeInlineContent (Nothing, m) = [m]
-  emphasisP :: TokenParser (Maybe Char, Markdown)
-  emphasisP = do
-    (mC, delim) <- leftFlankingDelimLen 1 '*'
-    content <- textTillDelim (Just $ rightFlankingDelim delim)
-    guard (content /= [Text ""])
-    return (mC, Emphasis content)
-  strongEmphasisP :: TokenParser (Maybe Char, Markdown)
-  strongEmphasisP = do
-    (mC, delim) <- leftFlankingDelimLen 2 '*'
-    content <- textTillDelim (Just $ rightFlankingDelim delim)
-    guard (content /= [Text ""])
-    return (mC, StrongEmphasis content)
+      then try strongemphasis <|> emphasis
+      else try emphasis <|> strongemphasis
+    where
+      consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
+      consumeInlineContent (Just c, m)  = [Text [c], m]
+      consumeInlineContent (Nothing, m) = [m]
+
+      emphasisP :: Bool -> String -> TokenParser (Maybe Char, Markdown)
+      emphasisP isStartOfDelimited s = do
+        (mC, delim) <- leftFlankingDelim isStartOfDelimited s
+        -- TODO needs to be changed to allow rightflankingdelim to use false after the first token is consumed.
+        content <- simplify <$> textTillDelim True (Just $ rightFlankingDelim delim False)
+        guard (not $ null content)
+        return (mC, (if (length s == 1) then Emphasis else StrongEmphasis) content)
 
 -- | Unit test
 ttextTillDelim :: Test
 ttextTillDelim = TestList
-  [ "Start of file" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
-  , "Not start of file" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello",Text " ",Text "world"]]
-  , "Strong emphasis" ~: runParser (textTillDelim Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello",Text " ",Text "world"]]
-  , "***hello world***" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Emphasis [StrongEmphasis [Text "hello",Text " ",Text "world"],Text ""]]
-  , "***hello* world**" ~: runParser (textTillDelim Nothing) () "" [StartOfFile,Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Emphasis [Text "hello"], Text " ", Text "world"]]
+  [ "*hello world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello world"]]
+  , "*hello world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "hello world"]]
+  , "**hello world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello world"]]
+  , "***hello world***" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Emphasis [StrongEmphasis [Text "hello world"]]]
+  , "***hello* world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Emphasis [Text "hello"], Text " world"]]
+  , "**hello** **world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello"], Text " ",StrongEmphasis [Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
 --   It returns the token that belongs to the content being delimited
 --   that was consumed to find the delimiter (as the delimiter can't be
 --   preceded by whitespace).
-rightFlankingDelim :: String -> TokenParser String
-rightFlankingDelim delim = do
-  mPunct <- optionMaybe (punctParserN delim)
-  case mPunct of
-    Nothing -> do
-      -- not preceded by punctuation
-      -- May be preceded by text or nothing.
-      prev <- optionMaybe textString
-      punctParserSeq delim
-      return $ maybe "" id prev
-    Just p  -> do
-      -- preceded by punctuation p
-      -- Must be followed by whitespace or punctuation
-      punctParserSeq delim
-      eof <|> skip (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
-      return $ [p]
-
--- | Unit test
-trightFlankingDelim :: Test
-trightFlankingDelim = TestList
-  [ "Delim at eof" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*'] ~?= Right "hello"
-  , "Delim whitespace" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Whitespace ' '] ~?= Right "hello"
-  , "Delim followed by text" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Word "world"] ~?= Right "hello"
-  , "Delim preceded by nothing" ~: runParser (rightFlankingDelim "*") () "" [Punctuation '*',Word "world"] ~?= Right ""
-  ]
+--   The delimiter is parameterized by a boolean, denoting whether the previous
+--   delimiter just finished (so there won't be any tokens to consume)
+rightFlankingDelim :: String -> Bool -> (TokenParser String)
+rightFlankingDelim delim justFinishedPrev =
+  if justFinishedPrev
+    then
+    -- If we just finished a delimited section, it must have had a punctuation
+    -- character. Therefore we need only check that it is followed by whitespace
+    -- or punctuation.
+      (do
+        punctParserSeq delim
+        notFollowedBy (whitespaceParser <|> newLineParser <|> punctParser)
+        return "") <|> rightFlankingDelim delim False
+    else do
+      -- General case -- TODO fix
+      notFollowedBy (whitespaceParser <|> newLineParser)
+      mPunct <- optionMaybe (punctParserN delim)
+      case mPunct of
+        Nothing -> do
+          -- not preceded by punctuation
+          -- Must be preceded by text.
+          prev <- textString
+          punctParserSeq delim
+          return prev
+        Just p  -> do
+          -- preceded by punctuation p
+          -- Must be followed by whitespace or punctuation
+          punctParserSeq delim
+          eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
+          return $ [p]
 
 -- | Top level token parser for any kind of Markdown
 inlineMarkdown :: TokenParser [Markdown]
-inlineMarkdown = textTillDelim Nothing
+inlineMarkdown = textTillDelim True Nothing
 
 
 -- Utilities for parsing individual types.
@@ -257,9 +279,9 @@ punctParserS s = tokenPrim show nextPos testMatch
 
 -- | Consumes a sequence of punctuation defined by the provided string. Fails
 --   if it isn't matched (may consume input so should be used with try)
-punctParserSeq :: String -> TokenParser ()
-punctParserSeq (c:cx) = punctParserS [c] *> punctParserSeq cx
-punctParserSeq []     = return ()
+punctParserSeq :: String -> TokenParser String
+punctParserSeq (c:cx) = (:) <$> punctParserS [c] <*> punctParserSeq cx
+punctParserSeq []     = return []
 
 -- | Consumes one punctuation token unless the punctuation character is in s.
 --   Fails if the next token isn't punctuation or is in the exception list.
@@ -290,21 +312,12 @@ newLineParser = tokenPrim show nextPos testMatch
     NewLine -> Just '\n'
     _       -> Nothing
 
--- | Parser that matches any whitespace. Must return unit to allow eof or
---   StartOfFile. Doesn't match eof when using lookAhead.
+-- | Parser that matches any whitespace. Must return unit to allow eof.
+--   Doesn't match eof when using lookAhead.
 anyWhitespaceParser :: TokenParser ()
-anyWhitespaceParser = skip whitespaceParser <|>
-                      skip newLineParser <|>
-                      eof <|>
-                      startOfFileParser
-
-startOfFileParser :: TokenParser ()
-startOfFileParser = tokenPrim show nextPos testMatch
-  where
-  nextPos   ps x xs = incSourceColumn ps 1
-  testMatch t       = case t of
-    StartOfFile -> Just ()
-    _           -> Nothing
+anyWhitespaceParser = void whitespaceParser <|>
+                      void newLineParser <|>
+                      eof
 
 -- | Escapes punctuation characters. If a \ preceeds an escapable punctuation,
 --   the following Punctuation type is replaced with a Word type and the \ is
@@ -386,7 +399,6 @@ anyTextString = tokenPrim show nextPos testMatch
     Punctuation p -> Just [p]
     Word        w -> Just w
     NewLine       -> Just "\n"
-    StartOfFile   -> Just ""
 
 -- | Consumes a word token and produces the contained value as a string.
 textString :: TokenParser String
