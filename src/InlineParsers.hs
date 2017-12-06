@@ -224,6 +224,8 @@ ttextTillDelim = TestList
   , "***hello world***" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Emphasis [StrongEmphasis [Text "hello world"]]]
   , "***hello* world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Emphasis [Text "hello"], Text " world"]]
   , "***hello** world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Emphasis [StrongEmphasis [Text "hello"], Text " world"]]
+-- TODO disagreement. The js dingus says this next one should be
+-- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
   , "***hello **world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*'] ~?= Right [Emphasis [Text "**hello **world"]]
   , "**hello** **world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [StrongEmphasis [Text "hello"], Text " ",StrongEmphasis [Text "world"]]
   ]
