@@ -78,8 +78,11 @@ many1Till p end = do
 -}
 
 exactly :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m [a]
-exactly n p = count n p <* ((try p *> fail "not exact") <|> return ())
+exactly n p = count n p <* betterNotFollowedBy p
 
+
+-- TODO add type
+betterNotFollowedBy p = (try p *> fail "not exact") <|> return ()
 
 manyTillEnd :: Parser a -> Parser [a] -> Parser [a]
 manyTillEnd p end = scan
@@ -95,3 +98,11 @@ sepByInclusive p sep = liftA2 (:) p (concat <$> many (liftA2 twoList sep p)) <|>
 
 someTill :: Parser a -> Parser b -> Parser [a]
 someTill p end = liftA2 (:) p (manyTill p end)
+
+
+consumeUpto :: Int -> Parser a -> Parser [a]
+consumeUpto 0 p = return []
+consumeUpto n p = do mx <- optional p
+                     case mx of
+                       Just x  -> (x :) <$> consumeUpto (n - 1) p
+                       Nothing -> return []

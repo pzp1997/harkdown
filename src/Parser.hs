@@ -78,17 +78,6 @@ blockP = manyTill (choice $ try <$> [ thematicBreak
                                     , paragraph
                                     ]) eof
 
--- inlineP :: Parser Markdown
--- inlineP = Text <$> many anyChar
-
--- runInlineP :: String -> Markdown
--- runInlineP s = case parse inlineP "" s of
---                  Left  _ -> undefined -- TODO replace with something sensible
---                  Right x -> x
-
-
--- inlineP = return . Text
-
 ----------------------------  BLOCK LEVEL PARSERS  ----------------------------
 
 -- the Monoid instance for Map is a left biased union. CommonMark respects the
@@ -120,10 +109,10 @@ setextHeading = undefined
 indentedCode = (PCodeBlock "" . concat) <$> some (try $ indentedLine <|> blankLine)
   where indentedLine = atLeast 4 spaceChar *> line -- TODO might be able to use line here
 
-fencedCode = do indentSize <- lineStart
+fencedCode = do w <- lineStart
                 openFence <- fenceMarker
                 infoString <- line
-                content <- manyTill (atMost indentSize spaceChar *> line) $
+                content <- manyTill (try blankLine <|> consumeUpto w spaceChar *> line) $
                              try (close openFence) <|> eof
                 return $ PCodeBlock (trim infoString) $ concat content
   where close f = do _ <- lineStart
@@ -169,14 +158,15 @@ text = undefined
 ----------------------------------- MARKERS -----------------------------------
 
 interruptMarkers :: Parser ()
-interruptMarkers = choice $ (try . lookAhead) <$> [ thematicMarker
-                                                  , () <$ atxMarker
-                                                  , () <$ fenceMarker
-                                                  , orderedListMarker *> repeatBetween 1 4 spaceChar *> nonWhiteSpaceChar *> return ()
-                                                  , unorderedListMarker *> repeatBetween 1 4 spaceChar *> nonWhiteSpaceChar *> return ()
-                                                  , blockquoteMarker
-                                                  , () <$ blankLine
-                                                  ]
+interruptMarkers = choice $ (try . lookAhead) <$>
+  [ thematicMarker
+  , void atxMarker
+  , void fenceMarker
+  , orderedListMarker *> repeatBetween 1 4 spaceChar *> nonWhiteSpaceChar *> return ()
+  , unorderedListMarker *> repeatBetween 1 4 spaceChar *> nonWhiteSpaceChar *> return ()
+  , blockquoteMarker
+  , void blankLine
+  ]
 
 thematicMarker :: Parser ()
 thematicMarker = choice (atLeast_ 3 . breakChar <$> "*-_") <* eol <?> "thematic break"
@@ -206,13 +196,8 @@ backtickString :: Parser String
 backtickString = some $ char '`'
 
 continutation :: Int -> Parser String
--- continutation = manyTill anyChar $ try (eol *> lookAhead blankLine_) <|> eof
 continutation w = manyTillEnd anyChar $ try stop <|> "" <$ eof
   where stop = eol <* atMost w spaceChar <* interruptMarkers
-
--- TODO not quite right. after the first chunk all others must be indented by at least w
--- listItemContent :: Int -> Parser String
--- listItemContent w = concat <$> sepBy1 (continutation w) (some $ try blankLine)
 
 listItemContent :: Int -> Parser String
 listItemContent w = do first <- continutation w
@@ -220,9 +205,6 @@ listItemContent w = do first <- continutation w
                                  (some $ try blankLine)
                                  (atLeast (w + 1) spaceChar *> continutation w)
                        return . concat $ first : rest
-  --
-  --  concat <$> liftA2 (:) (continutation w) (option $ blankLines *>
-  -- sepBy (atLeast (w + 1) spaceChar *> continutation w) blankLines)
 
 
 ----------------------------  DEFINITIONAL PARSERS  ---------------------------

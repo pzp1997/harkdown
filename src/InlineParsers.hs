@@ -12,14 +12,6 @@ import Test.HUnit
 import AST
 import ParserCombinators
 
--- Additional combinators --------------
-
--- | Utility to throw away the result of the parser. Used to make combinators happy.
-skip :: Stream s m t => ParsecT s u m a -> ParsecT s u m ()
-skip = (() <$)
-
------------------------------------------
-
 -- Initial pass tokenization ------------
 
 -- | Data structure used for the tokenization of the input
@@ -52,7 +44,7 @@ punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 --   or punctuation.
 pword :: Parser MdToken
 pword = Word <$> someTill anyChar
-  (lookAhead $ skip (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
+  (lookAhead $ void (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
 tokenizer = do
@@ -182,7 +174,7 @@ rightFlankingDelim delim = do
       -- preceded by punctuation p
       -- Must be followed by whitespace or punctuation
       punctParserSeq delim
-      eof <|> skip (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
+      eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
       return [p]
 
 -- | Unit test
@@ -255,8 +247,8 @@ newLineParser = tokenPrim show nextPos testMatch
 -- | Parser that matches any whitespace. Must return unit to allow eof or
 --   StartOfFile. Doesn't match eof when using lookAhead.
 -- anyWhitespaceParser :: TokenParser ()
--- anyWhitespaceParser = skip whitespaceParser <|>
---                       skip newLineParser <|>
+-- anyWhitespaceParser = void whitespaceParser <|>
+--                       void newLineParser <|>
 --                       eof <|>
 --                       startOfFileParser
 

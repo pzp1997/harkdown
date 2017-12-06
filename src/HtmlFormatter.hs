@@ -33,7 +33,7 @@ htmlify (OrderedList n tight items) = nlTag "ol" attr $ listItems tight items
 htmlify (UnorderedList tight items) = nlTag "ul" [] $ listItems tight items
 htmlify (BlockQuote xs)       = nlTag "blockquote" [] $ htmlify xs
 htmlify (CodeBlock info s)    = nl $ tag "pre" [] $ tag "code" codeAttr $ text s
-  where codeAttr = if null info then [] else [("class", "language-" ++ info)]
+  where codeAttr = if null info then [] else [("class", "language-" ++ firstWord info)]
 htmlify (Code s)     = tag "code" [] $ text s
 htmlify HorizontalRule        = nl $ selfClosingTag "hr" []
 htmlify SoftBreak             = char '\n'
@@ -61,12 +61,13 @@ listItems :: Bool -> [Markdown] -> Doc
 listItems tight xs
   | tight && all singleton xs = foldMap (nl . tag "li" [] . htmlify . tightContent) xs
   | otherwise                 = foldMap (nlTag "li" [] . htmlify) xs
-  where singleton (Many [_]) = True
-        singleton (Many _)   = False
-        singleton _          = True
-        tightContent (Many [md]) = md
-        tightContent (Many _)    = undefined
-        tightContent md          = md
+  where singleton (Many (_ : _ : _)) = False
+        singleton _                  = True
+        tightContent (Many [md])    = tightContent md
+        tightContent (Many [])      = Text ""
+        tightContent (Many _)       = undefined
+        tightContent (Paragraph md) = md
+        tightContent md             = md
 
 nl :: Doc -> Doc
 nl = (<> char '\n')
@@ -88,3 +89,9 @@ extractText HorizontalRule          = []
 extractText SoftBreak               = []
 extractText HardBreak               = []
 extractText (Many xs)               = concatMap extractText xs
+
+
+firstWord :: String -> String
+firstWord (c : cs)
+  | c /= ' ' = c : firstWord cs
+firstWord _ = ""
