@@ -368,22 +368,6 @@ buildAST s = case do
   (Right result) -> result
   (Left err)     -> error $ show err
 
-code :: TokenParser Markdown
-code = try $ do
-  C.optional $ Prim.many textWhitespace
-  atLeast_ 3 (punctParserS "`")
-  -- Find out how many additional ticks the user gave
-  addlTicks <- many (punctParserS "`")
-  label <- optionMaybe anyTextString
-  newLine
-  content <- manyTill
-    (anyTextString <|> textWhitespace)
-    ((try $ count_ (3 + length addlTicks) (punctParserS "`")) <|> eof)
-  -- Throw away whitespace on the same line
-  C.optional $ Prim.many textWhitespace
-  C.optional newLine
-  return $ BlockLiteral label (foldr (++) "" content)
-
 italics :: TokenParser Markdown
 italics = undefined
 
@@ -407,7 +391,7 @@ text = Text <$> anyTextString
 anyTextString :: TokenParser String
 anyTextString = tokenPrim show nextPos testMatch
   where
-  nextPos   ps x xs = incSourceColumn ps 1
+  nextPos   ps _ _  = incSourceColumn ps 1
   testMatch t       = case t of
     Whitespace  w -> Just [w]
     Punctuation p -> Just [p]
@@ -418,23 +402,7 @@ anyTextString = tokenPrim show nextPos testMatch
 textString :: TokenParser String
 textString = tokenPrim show nextPos testMatch
   where
-  nextPos   ps x xs = incSourceColumn ps 1
+  nextPos   ps _ _  = incSourceColumn ps 1
   testMatch t       = case t of
     Word w -> Just w
     _      -> Nothing
-
-textWhitespace :: TokenParser String
-textWhitespace = tokenPrim show nextPos testMatch
-  where
-  nextPos   ps x xs = incSourceColumn ps 1
-  testMatch t       = case t of
-    Whitespace  w -> Just [w]
-    _             -> Nothing
-
-newLine :: TokenParser Char
-newLine = tokenPrim show nextPos testMatch
-  where
-  nextPos   ps x xs = incSourceColumn ps 1
-  testMatch t       = case t of
-    NewLine -> Just '\n'
-    _       -> Nothing
