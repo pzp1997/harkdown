@@ -159,32 +159,40 @@ tleftFlankingDelimP = TestList
   ]
 
 -- | Parses text and inline markdown until the matching right flanking
---   delimiter is encountered.
-textTillDelim :: Bool -> Maybe (TokenParser String) -> TokenParser [Markdown]
-textTillDelim isStartOfDelimited mEnd = simplify <$> do
+--   delimiter is encountered. It is parameterized by a boolean indicating
+--   whether it's the first element in its enclosing context and a string,
+--   boolean pair of the closing delimiter and whether an inline context just
+--   closed, if a closing delimeter is expected.
+textTillDelim :: Bool -> Maybe (String, Bool) -> TokenParser [Markdown]
+textTillDelim isStartOfDelimited mEnd =
+  simplify <$> do
   case mEnd of
     -- No end delimiter provided.
     Nothing ->
       -- Done
       (try eof *> pure []) <|>
       -- Inline content
-      (try $ (++) <$> inlineContent True <*> textTillDelim False Nothing) <|>
+      (try $ (++) <$> inlineContent isStartOfDelimited <*> textTillDelim False mEnd) <|>
       -- Consume another token as text and recurse
       (try $ (:) <$> text <*> textTillDelim False Nothing)
 
     -- end delimiter provided.
-    Just end ->
+    Just (delim, prevJustClosed) ->
       -- First see if end has been reached.
-      (try $ liftA (\x -> [Text x]) end) <|>
+      (try $ liftA (\x -> [Text x]) $ rightFlankingDelim delim prevJustClosed) <|>
       -- Inline content
-      (try $ (++) <$> inlineContent isStartOfDelimited <*> textTillDelim False mEnd) <|>
+      (try $ (++) <$> inlineContent isStartOfDelimited <*> textTillDelim False (Just (delim, True))) <|>
       -- Consume another token as text and recurse
-      (try $ (:) <$> text <*> textTillDelim False mEnd)
-      -- Fails if eof has been reached
+      if prevJustClosed
+        then -- Just recurse with the delimiter's boolean set to false
+          textTillDelim isStartOfDelimited $ Just (delim, False)
+        else -- Consume another token and retry
+          (:) <$> text <*> textTillDelim False mEnd
   where
   -- | Parses a block of inline content, delimited by * or **. If the length of
   --   the delimiter is odd it first tries * and then **, and if even it tries
-  --   in opposite order.
+  --   in opposite order. It is parameterized by whether it is the first
+  --   element in an enclosing context (so no previous tokens can exist).
   inlineContent :: Bool -> TokenParser [Markdown]
   inlineContent isStartOfDelimited = consumeInlineContent <$> do
     (a, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
@@ -201,8 +209,10 @@ textTillDelim isStartOfDelimited mEnd = simplify <$> do
       emphasisP :: Bool -> String -> TokenParser (Maybe Char, Markdown)
       emphasisP isStartOfDelimited s = do
         (mC, delim) <- leftFlankingDelim isStartOfDelimited s
-        -- TODO needs to be changed to allow rightflankingdelim to use false after the first token is consumed.
-        content <- simplify <$> textTillDelim True (Just $ rightFlankingDelim delim False)
+        -- To prevent the right flanking delimiter from matching immediately,
+        -- we parameterize it with False. This forces the delimited section
+        -- to include at least one token.
+        content <- simplify <$> textTillDelim True (Just (delim, False))
         guard (not $ null content)
         return (mC, (if (length s == 1) then Emphasis else StrongEmphasis) content)
 
@@ -223,6 +233,7 @@ ttextTillDelim = TestList
 --   preceded by whitespace).
 --   The delimiter is parameterized by a boolean, denoting whether the previous
 --   delimiter just finished (so there won't be any tokens to consume)
+-- TODO make it take (String,Bool) instead of taking them separately
 rightFlankingDelim :: String -> Bool -> (TokenParser String)
 rightFlankingDelim delim justFinishedPrev =
   if justFinishedPrev
