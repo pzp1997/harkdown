@@ -78,14 +78,12 @@ pword = Word <$> many1Till
   (lookAhead $ void (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
-tokenizer = do
-  tokens <- Prim.many $ choice
+tokenizer = Prim.many $ choice
     [ ppunctuation
     , plinebreak
     , pwhitespace
     , pword
     ]
-  return tokens
 
 -- | Runs the tokenizer on the provided input.
 tokenize :: String -> Either ParseError [MdToken]
@@ -345,12 +343,6 @@ runEscapes (Punctuation '\\' : (Punctuation x) : xs)
   | otherwise                 = (Word "\\") : runEscapes (Punctuation x : xs)
 runEscapes (x:xs) = x : runEscapes xs
 runEscapes []     = []
-
--- | Version of count that throws away the contents
-count_ :: Int -> TokenParser a -> TokenParser ()
-count_ x p = do
-  count x p
-  return ()
 
 -- | Consumes an html pre, script, or style block and consumes all tokens until
 --   it reaches its associated close tag. It then uses that to generate a Text
