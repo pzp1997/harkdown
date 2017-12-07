@@ -65,13 +65,17 @@ tokenize = runParser tokenizer () ""
 type TokenParser a = ParsecT [MdToken] () Identity a
 
 -- | Utility that merges all text fields
--- simplify :: [Markdown] -> [Markdown]
--- simplify (Text "" : xs)         = simplify xs
--- simplify (Text x : Text y : xs) = simplify $ Text (x ++ y) : xs
--- simplify (Italics l : xs)       = Italics (simplify l) : simplify xs
--- simplify (Bold l : xs)          = Bold (simplify l) : simplify xs
--- simplify (x : xs)               = x : simplify xs
--- simplify []                     = []
+simplify :: [Markdown] -> [Markdown]
+simplify (Many xs : Many ys : rest) = simplify $ Many (xs ++ ys) : rest
+simplify (Many [] : rest)           = simplify rest
+simplify (Many [md] : rest)         = simplify $ md : rest
+simplify (Many xs : rest)           = Many (simplify xs) : simplify rest
+simplify (Text s : Text t : rest)   = simplify $ Text (s ++ t) : rest
+simplify (Text "" : rest)           = simplify rest
+simplify (Italics md : xs)          = Italics (Many $ simplify [md]) : simplify xs
+simplify (Bold md : xs)             = Bold (Many $ simplify [md]) : simplify xs
+simplify (x : xs)                   = x : simplify xs
+simplify []                         = []
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
 --   character and using the supplied parser to recognize the delimiter. It
@@ -131,7 +135,7 @@ tleftFlankingDelimP = TestList
 --   closed, if a closing delimeter is expected.
 textTillDelim :: Bool -> Maybe (String, Bool) -> TokenParser [Markdown]
 textTillDelim isStartOfDelimited mEnd =
-  -- simplify <$>
+  simplify <$>
   case mEnd of
     -- No end delimiter provided.
     Nothing ->
@@ -178,8 +182,8 @@ textTillDelim isStartOfDelimited mEnd =
         -- To prevent the right flanking delimiter from matching immediately,
         -- we parameterize it with False. This forces the delimited section
         -- to include at least one token.
-        -- content <- simplify <$> textTillDelim True (Just (delim, False))
-        content <- textTillDelim True $ Just (delim, False)
+        content <- simplify <$> textTillDelim True (Just (delim, False))
+        -- content <- textTillDelim True $ Just (delim, False)
         guard (not $ null content)
         return (mC, (if length s == 1 then Italics else Bold) $ Many content)
 
