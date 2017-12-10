@@ -2,8 +2,8 @@ module Parser where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.State
-import Data.Char (isSpace)
+import Control.Monad.State (State, modify, runState)
+import Data.Char (isSpace, isControl)
 import Data.List (isPrefixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -90,14 +90,14 @@ blockP = manyTill (choice $ try <$> [ thematicBreak
                                     , atxHeading
                                     , fencedCode
                                     , blankLine *> pure PBlankLine
+                                    , linkRef
                                     , paragraph
                                     ]) eof
 
 ----------------------------  BLOCK LEVEL PARSERS  ----------------------------
 
-thematicBreak, atxHeading,      setextHeading     :: Parser Partial
-indentedCode,  fencedCode,      paragraph         :: Parser Partial
-blockquote,    orderedListItem, unorderedListItem :: Parser Partial
+thematicBreak, atxHeading, setextHeading, indentedCode, fencedCode, paragraph,
+  blockquote, orderedListItem, unorderedListItem, linkRef :: Parser Partial
 
 thematicBreak = lineStart *> thematicMarker *> pure PHorizontalRule
 
@@ -113,7 +113,7 @@ atxHeading = do _ <- lineStart
 setextHeading = undefined
 
 indentedCode = (PCodeBlock "" . concat) <$> some (try $ indentedLine <|> blankLine)
-  where indentedLine = atLeast 4 spaceChar *> line -- TODO might be able to use line here
+  where indentedLine = atLeast 4 spaceChar *> line
 
 fencedCode = do
   w <- lineStart
@@ -145,17 +145,11 @@ unorderedListItem = do n <- lineStart
                        content <- listItemContent $ n + m
                        return $ PUnorderedListItem delim content
 
-linkRef :: Parser Partial
-linkRef = do
-  _ <- lineStart
-  l <- linkLabel
-  _ <- char ':'
-  _ <- spacesAround (optional eol)
-  d <- linkDestination
-  _ <- blankLine -- <* spacesAround (optional eol)
-  return $ PLinkRef l d
+linkRef = liftA2 PLinkRef
+  (lineStart *> linkLabel)
+  (char ':' *> spacesAround (optional eol) *> linkDestination <* blankLine) -- <* spacesAround (optional eol)
 
-linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> fail "TODO" -- TODO figure out what they mean by matching parens
+linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> many (satisfy $ \c -> not (isControl c || isSpace c))
 linkTitle = undefined
 
 ----------------------------------- MARKERS -----------------------------------
