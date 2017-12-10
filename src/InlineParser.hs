@@ -195,18 +195,33 @@ emOrStrong isStartOfDelimited = consumeInlineContent <$> do
 -- | Unit test
 trunInlineP :: Test
 trunInlineP = TestList
-  [ formTest "*hello world*" [Italics $ Many [Text "hello world"]]
-  , formTest "**hello world**" [Bold $ Many [Text "hello world"]]
-  , formTest "***hello world***" [Italics $ Many [Bold $ Many [Text "hello world"]]]
-  , formTest "***hello* world**" [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
-  , formTest "***hello** world*" [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
+  [ formTest "*hello world*"
+      [Italics $ Many [Text "hello world"]]
+  , formTest "**hello world**"
+      [Bold $ Many [Text "hello world"]]
+  , formTest "***hello world***"
+      [Italics $ Many [Bold $ Many [Text "hello world"]]]
+  , formTest "***hello* world**"
+      [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
+  , formTest "***hello** world*"
+      [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
 -- TODO disagreement. The js dingus says this next one should be
 -- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
-  , formTest "***hello **world*" [Italics $ Many [Text "**hello **world"]]
-  , formTest "**hello** **world**" [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
+  , formTest "***hello **world*"
+      [Italics $ Many [Text "**hello **world"]]
+  , formTest "**hello** **world**"
+      [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
   -- Inline Links
-  , formTest "[hello](/world)" [Link "/world" Nothing $ Many [Text "hello"]]
-  , formTest "[hello](/world (foo))" [Link "/world" (Just "foo") $ Many [Text "hello"]]
+  , formTest "[hello](/world)"
+      [Link "/world" Nothing $ Many [Text "hello"]]
+  , formTest "[hello](/world (foo))"
+      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+  , formTest "[hello](/world 'foo')"
+      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+  , formTest "[hello](/world \"foo\")"
+      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+  , formTest "[hello](/world ((foo)))"
+      [Link "/world" (Just "(foo)") $ Many [Text "hello"]]
   ]
   where
   formTest s mdl = s ~: runInlineP s Map.empty ~?= mdl
@@ -358,21 +373,31 @@ refLink = undefined
 inlineLink :: TokenParser Markdown
 inlineLink = do
   -- There are many more rules for link text, but as a first pass anything goes
-  linkText <- liftA Many $ (punctParserS "[") *>
-                           manyTill (text) (try $ punctParserS "]")
+  linkText <- liftA Many $ manyBetween
+    (punctParserS "[")
+    (try $ punctParserS "]")
+    text
   -- Not supporting surrounding destinations in <>.
-  (dest, title) <- punctParserS "(" *> destTitle <* punctParserS ")"
+  (dest, title) <- between
+    (punctParserS "(")
+    (try $ punctParserS ")")
+    destTitle
   return $ Link dest title linkText
   where
   destTitle :: TokenParser (String, Maybe String)
   destTitle = (,) <$>
-    (foldr (++) [] <$> manyTill
+    (concat <$> manyTill
       anyTextString
       (lookAhead $ punctParserS ")" <|> whitespaceParser)) <*>
     option Nothing (try title)
   title :: TokenParser (Maybe String)
-  title = (Just . foldr (++) []) <$>
-      (whitespaceParser *> manyTill anyTextString (lookAhead $ punctParserS ")"))
+  title = whitespaceParser *> 
+    ((Just . concat) <$>
+      choice
+        [ manyBetween (punctParserS "'") (punctParserS "'") anyTextString
+        , manyBetween (punctParserS "\"") (punctParserS "\"") anyTextString
+        , manyBetween (punctParserS "(") (punctParserS ")") anyTextString
+        ])
 
 image :: TokenParser Markdown
 image = undefined
