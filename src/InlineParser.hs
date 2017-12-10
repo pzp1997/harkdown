@@ -195,36 +195,40 @@ emOrStrong isStartOfDelimited = consumeInlineContent <$> do
 -- | Unit test
 trunInlineP :: Test
 trunInlineP = TestList
-  [ formTest "*hello world*"
+  [ formTest Map.empty "*hello world*"
       [Italics $ Many [Text "hello world"]]
-  , formTest "**hello world**"
+  , formTest Map.empty "**hello world**"
       [Bold $ Many [Text "hello world"]]
-  , formTest "***hello world***"
+  , formTest Map.empty "***hello world***"
       [Italics $ Many [Bold $ Many [Text "hello world"]]]
-  , formTest "***hello* world**"
+  , formTest Map.empty "***hello* world**"
       [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
-  , formTest "***hello** world*"
+  , formTest Map.empty "***hello** world*"
       [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
 -- TODO disagreement. The js dingus says this next one should be
 -- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
-  , formTest "***hello **world*"
+  , formTest Map.empty "***hello **world*"
       [Italics $ Many [Text "**hello **world"]]
-  , formTest "**hello** **world**"
+  , formTest Map.empty "**hello** **world**"
       [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
   -- Inline Links
-  , formTest "[hello](/world)"
+  , formTest Map.empty "[hello](/world)"
       [Link "/world" Nothing $ Many [Text "hello"]]
-  , formTest "[hello](/world )"
+  , formTest Map.empty "[hello](/world )"
       [Link "/world" Nothing $ Many [Text "hello"]]
-  , formTest "[hello](/world (foo))"
+  , formTest Map.empty "[hello](/world (foo))"
       [Link "/world" (Just "foo") $ Many [Text "hello"]]
-  , formTest "[hello](/world 'foo')"
+  , formTest Map.empty "[hello](/world 'foo')"
       [Link "/world" (Just "foo") $ Many [Text "hello"]]
-  , formTest "[hello](/world \"foo\")"
+  , formTest Map.empty "[hello](/world \"foo\")"
       [Link "/world" (Just "foo") $ Many [Text "hello"]]
+  -- Ref links
+  , formTest (Map.singleton "hello" "/url") "[hello]"
+      [Link "/url" Nothing $ Text "hello"]
   ]
   where
-  formTest s mdl = s ~: runInlineP s Map.empty ~?= mdl
+  formTest linkMap testString expected =
+    testString ~: runInlineP testString linkMap ~?= expected
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
 --   It returns the token that belongs to the content being delimited
@@ -262,13 +266,12 @@ rightFlankingDelim delim justFinishedPrev =
           eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
           return [p]
 
--- | Top level token parser for any kind of Markdown
+-- | Top level token parser for any kind of Markdown. Doesn't match text so should match separately.
 inlineMarkdown :: Bool -> TokenParser [Markdown]
 inlineMarkdown isStartOfDelimited = choice
-  [ pure <$> inlineLink
-  , pure <$> refLink
-  , emOrStrong isStartOfDelimited
-  , pure <$> text
+  [ pure <$> try inlineLink
+  , pure <$> try refLink
+  , try $ emOrStrong isStartOfDelimited
   ]
 
 -- Utilities for parsing individual types.
@@ -359,7 +362,7 @@ runInlineP s m = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-                      runParser (concat <$> many (inlineMarkdown True)) m "" $ runEscapes tok
+    runParser (concat <$> many (inlineMarkdown True <|> pure <$> text)) m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
