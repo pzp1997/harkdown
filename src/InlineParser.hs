@@ -4,12 +4,15 @@ import Control.Applicative
 import Control.Monad
 import Data.Maybe (isJust)
 
-import Test.HUnit -- TODO remove this
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
 
 import AST
 import ParserCombinators
+
+-- Imports for tests only
+import Test.HUnit
+import qualified Data.Map.Strict as Map
 
 -- Initial pass tokenization ------------
 
@@ -61,7 +64,7 @@ tokenize = runParser tokenizer () ""
 -- Second pass markdown parser (over tokens) ----
 
 -- | Parser that works over the MdTokens defined above instead of Strings.
-type TokenParser a = Parsec [MdToken] () a
+type TokenParser a = Parsec [MdToken] LinkRefMap a
 
 -- | Utility that merges all text fields
 simplify :: [Markdown] -> [Markdown]
@@ -128,11 +131,11 @@ leftFlankingDelimAll startOfDelimited c =
 tleftFlankingDelimP :: Test
 tleftFlankingDelimP = TestList
   [ "*hello" ~:
-      runParser (leftFlankingDelim True "*") () "" [Punctuation '*',Word "hello"] ~?= Right (Nothing, "*")
+      runParser (leftFlankingDelim True "*") Map.empty "" [Punctuation '*',Word "hello"] ~?= Right (Nothing, "*")
   , "Token remains" ~:
-      runParser (leftFlankingDelim True "*" *> text) () "" [Punctuation '*',Word "hello"] ~?= Right (Text "hello")
+      runParser (leftFlankingDelim True "*" *> text) Map.empty "" [Punctuation '*',Word "hello"] ~?= Right (Text "hello")
   , "Leading whitespace" ~:
-      runParser (leftFlankingDelim False "*") () "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
+      runParser (leftFlankingDelim False "*") Map.empty "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
   ]
 
 -- | Parses text and inline markdown until the matching right flanking
@@ -197,15 +200,15 @@ textTillDelim isStartOfDelimited mEnd =
 -- | Unit test
 ttextTillDelim :: Test
 ttextTillDelim = TestList
-  [ "*hello world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "hello world"]]
-  , "**hello world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello world"]]
-  , "***hello world***" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello world"]]]
-  , "***hello* world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
-  , "***hello** world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
+  [ "*hello world*" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "hello world"]]
+  , "**hello world**" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello world"]]
+  , "***hello world***" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello world"]]]
+  , "***hello* world**" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
+  , "***hello** world*" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
 -- TODO disagreement. The js dingus says this next one should be
 -- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
-  , "***hello **world*" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "**hello **world"]]
-  , "**hello** **world**" ~: runParser (textTillDelim True Nothing) () "" [Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
+  , "***hello **world*" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "**hello **world"]]
+  , "**hello** **world**" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
   ]
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
@@ -403,11 +406,11 @@ preBlock = undefined
 --   fully consumed to create valid Markdown.
 
 runInlineP :: String -> LinkRefMap -> [Markdown]
-runInlineP s _ = case parseOut of
+runInlineP s m = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-                      parse inlineMarkdown "" $ runEscapes tok
+                      runParser inlineMarkdown m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
