@@ -43,6 +43,10 @@ manyBetween :: Stream s m t => ParsecT s u m open -> ParsecT s u m close ->
   ParsecT s u m a -> ParsecT s u m [a]
 manyBetween open close p = open *> manyTill p close
 
+someBetween :: Stream s m t => ParsecT s u m open -> ParsecT s u m close ->
+  ParsecT s u m a -> ParsecT s u m [a]
+someBetween open close p = open *> someTill p close
+
 repeatBetween :: Stream s m t => Int -> Int -> ParsecT s u m a -> ParsecT s u m [a]
 repeatBetween lo hi p = helper 0
   where helper n

@@ -214,14 +214,14 @@ trunInlineP = TestList
   -- Inline Links
   , formTest "[hello](/world)"
       [Link "/world" Nothing $ Many [Text "hello"]]
+  , formTest "[hello](/world )"
+      [Link "/world" Nothing $ Many [Text "hello"]]
   , formTest "[hello](/world (foo))"
       [Link "/world" (Just "foo") $ Many [Text "hello"]]
   , formTest "[hello](/world 'foo')"
       [Link "/world" (Just "foo") $ Many [Text "hello"]]
   , formTest "[hello](/world \"foo\")"
       [Link "/world" (Just "foo") $ Many [Text "hello"]]
-  , formTest "[hello](/world ((foo)))"
-      [Link "/world" (Just "(foo)") $ Many [Text "hello"]]
   ]
   where
   formTest s mdl = s ~: runInlineP s Map.empty ~?= mdl
@@ -391,13 +391,13 @@ inlineLink = do
       (lookAhead $ punctParserS ")" <|> whitespaceParser)) <*>
     option Nothing (try title)
   title :: TokenParser (Maybe String)
-  title = whitespaceParser *> 
+  title = whitespaceParser *>
     ((Just . concat) <$>
       choice
-        [ manyBetween (punctParserS "'") (punctParserS "'") anyTextString
-        , manyBetween (punctParserS "\"") (punctParserS "\"") anyTextString
-        , manyBetween (punctParserS "(") (punctParserS ")") anyTextString
-        ])
+        [ someBetween (punctParserS "'") (punctParserS "'") anyTextString
+        , someBetween (punctParserS "\"") (punctParserS "\"") anyTextString
+        , someBetween (punctParserS "(") (punctParserS ")") anyTextString
+        ] <|> pure Nothing)
 
 image :: TokenParser Markdown
 image = undefined
