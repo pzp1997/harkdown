@@ -6,7 +6,8 @@ import Data.List (groupBy)
 import Data.Text (Text, pack)
 import Test.HUnit
 
-import HtmlFormatter (markdownToHtml)
+import HtmlFormatter (renderHtml)
+import Parser (runMainP)
 
 runSpecTests :: IO Counts
 runSpecTests = do
@@ -37,7 +38,7 @@ instance FromJSON Example where
 
 testExample :: Example -> Test
 testExample example = show (exampleId example) ~:
-  markdownToHtml (exampleMarkdown example) ~?= exampleHtml example
+  renderHtml (runMainP $ exampleMarkdown example) ~?= exampleHtml example
 
 testSection :: [Example] -> Test
 testSection []                     = TestList []

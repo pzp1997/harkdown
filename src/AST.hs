@@ -23,11 +23,14 @@ data Partial
   = PHeader Int String
   | POrderedListItem Int Char String
   | PUnorderedListItem Char String
+  -- | POrderedListItem Int Char [Partial]
+  -- | PUnorderedListItem Char [Partial]
   | POrderedList Int Char Bool [Markdown]
   | PUnorderedList Char Bool [Markdown]
-  | PBlockQuote String
+  | PBlockQuote [Partial]
   | PCodeBlock String String
   | PHorizontalRule
   | PParagraph String
   | PBlankLine
+  | PLinkRef String String
   deriving (Eq, Show)

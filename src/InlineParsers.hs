@@ -3,7 +3,7 @@ module InlineParsers where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
-import Data.Maybe (isJust, fromMaybe)
+import Data.Maybe (isJust)
 
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
@@ -77,6 +77,14 @@ simplify (Bold md : xs)             = Bold (Many $ simplify [md]) : simplify xs
 simplify (x : xs)                   = x : simplify xs
 simplify []                         = []
 
+
+-- TODO add type
+-- interrupt = choice
+--   [ pure <$> (whitespaceParser <|> punctParserN "*") <* lookAhead (some (punctParserS "*") *> betterNotFollowedBy whitespaceParser)
+--   , "" <$ lookAhead (some (punctParserS "*") *> betterNotFollowedBy (whitespaceParser <|> punctParser))
+--   ]
+
+
 -- | Parser that recognizes a left flanking delimiter run of the supplied
 --   character and using the supplied parser to recognize the delimiter. It
 --   returns the pair of the maybe character consumed to delineate a left
@@ -142,7 +150,7 @@ textTillDelim isStartOfDelimited mEnd =
       -- Done
       try ([Text ""] <$ eof) <|>
       -- Inline content
-      try (liftA2 (++) (inlineContent isStartOfDelimited) (textTillDelim False mEnd)) <|>
+      try (liftA2 (++) inlineContent (textTillDelim False mEnd)) <|>
       -- Consume another token as text and recurse
       try (liftA2 (:) text (textTillDelim False mEnd))
 
@@ -151,7 +159,7 @@ textTillDelim isStartOfDelimited mEnd =
       -- First see if end has been reached.
       try (pure . Text <$> rightFlankingDelim delim prevJustClosed) <|>
       -- Inline content
-      try (liftA2 (++) (inlineContent isStartOfDelimited) (textTillDelim False $ Just (delim, True))) <|>
+      try (liftA2 (++) inlineContent (textTillDelim False $ Just (delim, True))) <|>
       -- Consume another token as text and recurse
       if prevJustClosed
         then -- Just recurse with the delimiter's boolean set to false
@@ -163,11 +171,11 @@ textTillDelim isStartOfDelimited mEnd =
   --   the delimiter is odd it first tries * and then **, and if even it tries
   --   in opposite order. It is parameterized by whether it is the first
   --   element in an enclosing context (so no previous tokens can exist).
-  inlineContent :: Bool -> TokenParser [Markdown]
-  inlineContent isStartOfDelimited = consumeInlineContent <$> do
-    (a, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
-    let emphasis = emphasisP isStartOfDelimited "*"
-        strongemphasis = emphasisP isStartOfDelimited "**"
+  inlineContent :: TokenParser [Markdown]
+  inlineContent = consumeInlineContent <$> do
+    (_, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
+    let emphasis = emphasisP "*"
+        strongemphasis = emphasisP "**"
     if even (length maxdelim)
       then try strongemphasis <|> emphasis
       else try emphasis <|> strongemphasis
@@ -176,8 +184,8 @@ textTillDelim isStartOfDelimited mEnd =
       consumeInlineContent (Just c, m)  = [Text [c], m]
       consumeInlineContent (Nothing, m) = [m]
 
-      emphasisP :: Bool -> String -> TokenParser (Maybe Char, Markdown)
-      emphasisP isStartOfDelimited s = do
+      emphasisP :: String -> TokenParser (Maybe Char, Markdown)
+      emphasisP s = do
         (mC, delim) <- leftFlankingDelim isStartOfDelimited s
         -- To prevent the right flanking delimiter from matching immediately,
         -- we parameterize it with False. This forces the delimited section
@@ -216,7 +224,7 @@ rightFlankingDelim delim justFinishedPrev =
     -- character. Therefore we need only check that it is followed by whitespace
     -- or punctuation.
       (do
-        punctParserSeq delim
+        _ <- punctParserSeq delim
         notFollowedBy (whitespaceParser <|> newLineParser <|> punctParser)
         return "") <|> rightFlankingDelim delim False
     else do
@@ -228,12 +236,12 @@ rightFlankingDelim delim justFinishedPrev =
           -- not preceded by punctuation
           -- Must be preceded by text.
           prev <- textString
-          punctParserSeq delim
+          _ <- punctParserSeq delim
           return prev
         Just p  -> do
           -- preceded by punctuation p
           -- Must be followed by whitespace or punctuation
-          punctParserSeq delim
+          _ <- punctParserSeq delim
           eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
           return [p]
 

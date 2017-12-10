@@ -5,12 +5,8 @@ import Data.Maybe (maybe)
 import Text.PrettyPrint
 
 import AST
-import Parser (mainP)
 
 type Attributes = [(String, String)]
-
-markdownToHtml :: String -> String
-markdownToHtml = renderHtml . mainP
 
 renderHtml :: [Markdown] -> String
 renderHtml = render . foldMap htmlify
