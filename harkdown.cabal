@@ -13,7 +13,7 @@ extra-source-files:  ChangeLog.md, README.md
 cabal-version:       >=1.10
 
 executable harkdown
-  ghc-options:         -Wall
+  ghc-options:         -Wall -Wextra
   main-is:             Main.hs
   -- TODO remove HUnit
   build-depends:         base >=4.10 && <4.11
@@ -27,7 +27,7 @@ executable harkdown
   default-language:    Haskell98
 
 test-suite spec
-  ghc-options:         -Wall
+  ghc-options:         -Wall -Wextra
   type: exitcode-stdio-1.0
   main-is:             Test.hs
   build-depends:         base >=4.10 && <4.11

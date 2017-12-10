@@ -2,13 +2,12 @@ module InlineParsers where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Identity
 import Data.Map (Map)
 import Data.Maybe (isJust)
 
+import Test.HUnit -- TODO remove this
 import Text.Parsec hiding (many, optional, (<|>))
 import Text.Parsec.String (Parser)
-import Test.HUnit
 
 import AST
 import ParserCombinators
@@ -63,7 +62,7 @@ tokenize = runParser tokenizer () ""
 -- Second pass markdown parser (over tokens) ----
 
 -- | Parser that works over the MdTokens defined above instead of Strings.
-type TokenParser a = ParsecT [MdToken] () Identity a
+type TokenParser a = Parsec [MdToken] () a
 
 -- | Utility that merges all text fields
 simplify :: [Markdown] -> [Markdown]
@@ -406,7 +405,7 @@ preBlock = undefined
 
 -- TODO replace with LinkRefMap
 runInlineP :: String -> Map String String -> [Markdown]
-runInlineP s m = case parseOut of
+runInlineP s _ = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s

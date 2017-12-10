@@ -3,18 +3,18 @@ module Parser where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.State (State, modify, runState)
-import Data.Char (isSpace, isControl)
+import Data.Char (isControl, isSpace)
 import Data.List (isPrefixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 
-import Text.Parsec hiding (many, optional, (<|>), State)
+import Text.Parsec hiding (State, many, optional, (<|>))
 import Text.Parsec.String (Parser)
 
 import AST
-import ParserCombinators
 import InlineParsers (runInlineP)
+import ParserCombinators
 
 --------------------------------  BIG PARSERS  --------------------------------
 
@@ -149,7 +149,10 @@ linkRef = liftA2 PLinkRef
   (lineStart *> linkLabel)
   (char ':' *> spacesAround (optional eol) *> linkDestination <* blankLine) -- <* spacesAround (optional eol)
 
+linkDestination :: Parser String
 linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> many (satisfy $ \c -> not (isControl c || isSpace c))
+
+linkTitle :: Parser String
 linkTitle = undefined
 
 ----------------------------------- MARKERS -----------------------------------
@@ -230,8 +233,8 @@ linkLabel = between (char '[') (char ']') contentP
 -------------------------------  STRING HELPERS  ------------------------------
 
 newlineTerminate :: String -> String
-newlineTerminate ""   = "\n"
-newlineTerminate "\n" = "\n"
+newlineTerminate ""       = "\n"
+newlineTerminate "\n"     = "\n"
 newlineTerminate (c : cs) = c : newlineTerminate cs
 
 condenseSpace :: String -> String

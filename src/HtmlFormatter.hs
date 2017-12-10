@@ -1,10 +1,10 @@
 module HtmlFormatter where
 
-import Data.Maybe (maybe)
+import           Data.Maybe       (maybe)
 
-import Text.PrettyPrint
+import           Text.PrettyPrint
 
-import AST
+import           AST
 
 type Attributes = [(String, String)]
 
