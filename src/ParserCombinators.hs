@@ -2,13 +2,29 @@ module ParserCombinators where
 
 import Control.Applicative
 import Data.Char (isSpace)
+import Data.Maybe (fromMaybe)
 
 import Text.Parsec hiding (many, optional, (<|>))
+
+----------------------------  DEFINITIONAL PARSERS  ---------------------------
+
+nonWhiteSpaceChar :: Parsec String u Char
+nonWhiteSpaceChar = satisfy (not . isSpace)
+
+-- TODO deal with escaped brackets here
+linkLabel :: Parsec String u String
+linkLabel = between (char '[') (char ']') contentP
+  where contentP = do ref <- repeatBetween 1 999 (noneOf "[]")
+                      if all isSpace ref
+                        then fail "valid link ref"
+                        else return (condenseSpace ref)
 
 eol :: Parsec String u String
 eol =   string "\n"
     <|> liftA2 (++) (string "\r") (string "\n" <|> string "")
     <?> "end of line"
+
+-----------------------------  PARSER COMBINATORS  ----------------------------
 
 atLeast :: Stream s m t => Int -> ParsecT s u m a -> ParsecT s u m [a]
 atLeast n p
@@ -63,3 +79,22 @@ consumeUpto n p = do mx <- optional p
                      case mx of
                        Just x  -> (x :) <$> consumeUpto (n - 1) p
                        Nothing -> return []
+
+-------------------------------  STRING HELPERS  ------------------------------
+
+trim :: String -> String
+trim = dropWhileRight isSpace . dropWhile isSpace
+  where dropWhileRight p = fromMaybe [] . foldr combine Nothing
+          where combine x Nothing = if p x then Nothing else Just [x]
+                combine x xs      = (x :) <$> xs
+
+condenseSpace :: String -> String
+condenseSpace = helper . dropWhile isSpace
+  where helper [x]
+          | isSpace x              = ""
+        helper [x, y]
+          | isSpace x && isSpace y = ""
+        helper (x : xs@(y : ys))
+          | isSpace x && isSpace y = helper $ ' ' : ys
+          | otherwise              = x : helper xs
+        helper a                   = a

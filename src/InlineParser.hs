@@ -1,8 +1,7 @@
-module InlineParsers where
+module InlineParser where
 
 import Control.Applicative
 import Control.Monad
-import Data.Map (Map)
 import Data.Maybe (isJust)
 
 import Test.HUnit -- TODO remove this
@@ -403,8 +402,7 @@ preBlock = undefined
 -- | Create a Markdown AST from the input string. Errors if the string can't be
 --   fully consumed to create valid Markdown.
 
--- TODO replace with LinkRefMap
-runInlineP :: String -> Map String String -> [Markdown]
+runInlineP :: String -> LinkRefMap -> [Markdown]
 runInlineP s _ = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?

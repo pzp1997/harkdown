@@ -1,5 +1,7 @@
 module AST where
 
+import Data.Map (Map)
+
 data Markdown
   = Bold Markdown
   | Italics Markdown
@@ -33,3 +35,5 @@ data Partial
   | PBlankLine
   | PLinkRef String String
   deriving (Eq, Show)
+
+type LinkRefMap = Map String String
