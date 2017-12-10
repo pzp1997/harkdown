@@ -138,78 +138,78 @@ tleftFlankingDelimP = TestList
       runParser (leftFlankingDelim False "*") Map.empty "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
   ]
 
--- | Parses text and inline markdown until the matching right flanking
+
+
+-- | Parses inline markdown and text until the matching right flanking
 --   delimiter is encountered. It is parameterized by a boolean indicating
 --   whether it's the first element in its enclosing context and a string,
 --   boolean pair of the closing delimiter and whether an inline context just
---   closed, if a closing delimeter is expected.
-textTillDelim :: Bool -> Maybe (String, Bool) -> TokenParser [Markdown]
-textTillDelim isStartOfDelimited mEnd =
+--   closed.
+mdTillDelim :: Bool -> (String, Bool) -> TokenParser [Markdown]
+mdTillDelim isStartOfDelimited (delim, prevJustClosed) =
   simplify <$>
-  case mEnd of
-    -- No end delimiter provided.
-    Nothing ->
-      -- Done
-      try ([Text ""] <$ eof) <|>
-      -- Inline content
-      try (liftA2 (++) inlineContent (textTillDelim False mEnd)) <|>
-      -- Consume another token as text and recurse
-      try (liftA2 (:) text (textTillDelim False mEnd))
+    -- First see if end has been reached.
+    (try (pure . Text <$> rightFlankingDelim delim prevJustClosed)) <|>
+    -- Inline content
+    (try (liftA2 (++)
+      (inlineMarkdown isStartOfDelimited)
+      (mdTillDelim False (delim, True)))) <|>
+    -- Consume another token as text and recurse
+    if prevJustClosed
+      then -- Try the same, but allow the right flanking delim to consume an
+           -- additional character
+        mdTillDelim isStartOfDelimited (delim, False)
+      else -- Consume another token and retry
+        liftA2 (:) text $ mdTillDelim False (delim, False)
 
-    -- end delimiter provided.
-    Just (delim, prevJustClosed) ->
-      -- First see if end has been reached.
-      try (pure . Text <$> rightFlankingDelim delim prevJustClosed) <|>
-      -- Inline content
-      try (liftA2 (++) inlineContent (textTillDelim False $ Just (delim, True))) <|>
-      -- Consume another token as text and recurse
-      if prevJustClosed
-        then -- Just recurse with the delimiter's boolean set to false
-          textTillDelim isStartOfDelimited $ Just (delim, False)
-        else -- Consume another token and retry
-          liftA2 (:) text (textTillDelim False mEnd)
+-- | Parses a block of inline content, delimited by * or **. If the length of
+--   the delimiter is odd it first tries * and then **, and if even it tries
+--   in opposite order. It is parameterized by whether it is the first
+--   element in an enclosing context (so no previous tokens can exist).
+--   Matches a list of Markdown so that if a text token had to be consumed to
+--   create the delimiter it isn't lost.
+emOrStrong :: Bool -> TokenParser [Markdown]
+emOrStrong isStartOfDelimited = consumeInlineContent <$> do
+  (_, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
+  let emphasis = emphasisP "*"
+      strongemphasis = emphasisP "**"
+  if even (length maxdelim)
+    then try strongemphasis <|> emphasis
+    else try emphasis <|> strongemphasis
   where
-  -- | Parses a block of inline content, delimited by * or **. If the length of
-  --   the delimiter is odd it first tries * and then **, and if even it tries
-  --   in opposite order. It is parameterized by whether it is the first
-  --   element in an enclosing context (so no previous tokens can exist).
-  inlineContent :: TokenParser [Markdown]
-  inlineContent = consumeInlineContent <$> do
-    (_, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
-    let emphasis = emphasisP "*"
-        strongemphasis = emphasisP "**"
-    if even (length maxdelim)
-      then try strongemphasis <|> emphasis
-      else try emphasis <|> strongemphasis
-    where
-      consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
-      consumeInlineContent (Just c, m)  = [Text [c], m]
-      consumeInlineContent (Nothing, m) = [m]
+    consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
+    consumeInlineContent (Just c, m)  = [Text [c], m]
+    consumeInlineContent (Nothing, m) = [m]
 
-      emphasisP :: String -> TokenParser (Maybe Char, Markdown)
-      emphasisP s = do
-        (mC, delim) <- leftFlankingDelim isStartOfDelimited s
-        -- To prevent the right flanking delimiter from matching immediately,
-        -- we parameterize it with False. This forces the delimited section
-        -- to include at least one token.
-        content <- simplify <$> textTillDelim True (Just (delim, False))
-        -- content <- textTillDelim True $ Just (delim, False)
-        guard (not $ null content)
-        return (mC, (if length s == 1 then Italics else Bold) $ Many content)
+    emphasisP :: String -> TokenParser (Maybe Char, Markdown)
+    emphasisP s = do
+      (mC, delim) <- leftFlankingDelim isStartOfDelimited s
+      -- To prevent the right flanking delimiter from matching immediately,
+      -- we parameterize it with False. This forces the delimited section
+      -- to include at least one token.
+      content <- simplify <$> mdTillDelim True (delim, False)
+      -- content <- mdTillDelim True $ Just (delim, False)
+      guard (not $ null content)
+      return (mC, (if length s == 1 then Italics else Bold) $ Many content)
 
 -- | Unit test
-ttextTillDelim :: Test
-ttextTillDelim = TestList
-  [ "*hello world*" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "hello world"]]
-  , "**hello world**" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello world"]]
-  , "***hello world***" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Word "world",Punctuation '*',Punctuation '*',Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello world"]]]
-  , "***hello* world**" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Whitespace ' ',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
-  , "***hello** world*" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
+trunInlineP :: Test
+trunInlineP = TestList
+  [ formTest "*hello world*" [Italics $ Many [Text "hello world"]]
+  , formTest "**hello world**" [Bold $ Many [Text "hello world"]]
+  , formTest "***hello world***" [Italics $ Many [Bold $ Many [Text "hello world"]]]
+  , formTest "***hello* world**" [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
+  , formTest "***hello** world*" [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
 -- TODO disagreement. The js dingus says this next one should be
 -- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
-  , "***hello **world*" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Punctuation '*',Word "hello",Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*'] ~?= Right [Italics $ Many [Text "**hello **world"]]
-  , "**hello** **world**" ~: runParser (textTillDelim True Nothing) Map.empty "" [Punctuation '*',Punctuation '*',Word "hello",Punctuation '*',Punctuation '*',Whitespace ' ',Punctuation '*',Punctuation '*',Word "world",Punctuation '*',Punctuation '*'] ~?= Right [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
+  , formTest "***hello **world*" [Italics $ Many [Text "**hello **world"]]
+  , formTest "**hello** **world**" [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
+  -- Inline Links
+  , formTest "[hello](/world)" [Link "/world" Nothing $ Many [Text "hello"]]
+  , formTest "[hello](/world (foo))" [Link "/world" (Just "foo") $ Many [Text "hello"]]
   ]
+  where
+  formTest s mdl = s ~: runInlineP s Map.empty ~?= mdl
 
 -- | Parser that recognizes a right flanking delimiter run matching delim.
 --   It returns the token that belongs to the content being delimited
@@ -247,80 +247,14 @@ rightFlankingDelim delim justFinishedPrev =
           eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
           return [p]
 
--- TODO palmer combine with definition above
--- | Parses as much as possible until it encounters any valid left flanking
---   delimiter or the provided specific right flanking delimiter. If a left
---   flanking delimiter is encountered it attempts to recurse for that nested
---   markdown document. On success or failure of the recursed parser it then
---   resumes looking for the matching right flanking delimiter specified. If no
---   right flanking delimiter is provided it consumes until the end of file.
--- textTillDelim :: Maybe (TokenParser String) -> TokenParser [Markdown]
--- textTillDelim mEnd =
---   -- If an end delimiter was provided, attempt to apply it. The parser fails if
---   -- eof is reached and there is a provided end parser.
---   -- First see if end has been reached.
---   try ((pure . Text) <$> fromMaybe ("" <$ eof) mEnd) <|>
---   -- Inline content
---   try (liftA2 (++) (consumeInlineContent <$> inlineContent) (textTillDelim mEnd)) <|>
---   -- Consume another token as text and recurse
---   liftA2 (:) text (textTillDelim mEnd)
---   -- Fails if eof has been reached
---   where
---   inlineContent :: TokenParser (Maybe Char, Markdown)
---   inlineContent = do
---     maxdelim <- lookAhead (try $ leftFlankingDelimAll '*')
---     if even (length maxdelim)
---       then try strongEmphasisP <|> try emphasisP
---       else try emphasisP <|> try strongEmphasisP
---   consumeInlineContent :: (Maybe Char, Markdown) -> [Markdown]
---   consumeInlineContent (Just c, m)  = [Text [c], m]
---   consumeInlineContent (Nothing, m) = [m]
---   emphasisP :: TokenParser (Maybe Char, Markdown)
---   emphasisP = do
---     (mC, delim) <- leftFlankingDelimLen 1 '*'
---     content <- textTillDelim (Just $ rightFlankingDelim delim)
---     guard (content /= [Text ""])
---     return (mC, Italics $ Many content)
---   strongEmphasisP :: TokenParser (Maybe Char, Markdown)
---   strongEmphasisP = do
---     (mC, delim) <- leftFlankingDelimLen 2 '*'
---     content <- textTillDelim (Just $ rightFlankingDelim delim)
---     guard (content /= [Text ""])
---     return (mC, Bold $ Many content)
-
--- | Parser that recognizes a right flanking delimiter run matching delim.
---   It returns the token that belongs to the content being delimited
---   that was consumed to find the delimiter (as the delimiter can't be
---   preceded by whitespace).
--- rightFlankingDelim :: String -> TokenParser String
--- rightFlankingDelim delim = do
---   mPunct <- optionMaybe (punctParserN delim)
---   case mPunct of
---     Nothing -> do
---       -- not preceded by punctuation
---       -- May be preceded by text or nothing.
---       prev <- optionMaybe textString
---       punctParserSeq delim
---       return $ fromMaybe "" prev
---     Just p  -> do
---       -- preceded by punctuation p
---       -- Must be followed by whitespace or punctuation
---       punctParserSeq delim
---       eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
---       return [p]
-
--- | Unit test
--- trightFlankingDelim :: Test
--- trightFlankingDelim = TestList
---   [ "Delim at eof" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*'] ~?= Right "hello"
---   , "Delim whitespace" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Whitespace ' '] ~?= Right "hello"
---   , "Delim followed by text" ~: runParser (rightFlankingDelim "*") () "" [Word "hello",Punctuation '*',Word "world"] ~?= Right "hello"
---   , "Delim preceded by nothing" ~: runParser (rightFlankingDelim "*") () "" [Punctuation '*',Word "world"] ~?= Right ""
---   ]
-
 -- | Top level token parser for any kind of Markdown
-inlineMarkdown :: TokenParser [Markdown]
-inlineMarkdown = textTillDelim True Nothing
+inlineMarkdown :: Bool -> TokenParser [Markdown]
+inlineMarkdown isStartOfDelimited = choice
+  [ pure <$> inlineLink
+  --, refLink
+  , emOrStrong isStartOfDelimited
+  , pure <$> text
+  ]
 
 -- Utilities for parsing individual types.
 -- | Consumes one punctuation token. Fails if the next token isn't punctuation.
@@ -410,7 +344,7 @@ runInlineP s m = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-                      runParser inlineMarkdown m "" $ runEscapes tok
+                      runParser (concat <$> many (inlineMarkdown True)) m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
@@ -418,8 +352,11 @@ code = undefined
 italics :: TokenParser Markdown
 italics = undefined
 
-link :: TokenParser Markdown
-link = do
+refLink :: TokenParser Markdown
+refLink = undefined
+
+inlineLink :: TokenParser Markdown
+inlineLink = do
   -- There are many more rules for link text, but as a first pass anything goes
   linkText <- liftA Many $ (punctParserS "[") *>
                            manyTill (text) (try $ punctParserS "]")
