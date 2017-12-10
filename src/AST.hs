@@ -21,13 +21,12 @@ data Markdown
 
 data Partial
   = PHeader Int String
+  | POrderedList Int Char Bool [[Partial]]
   | POrderedListItem Int Char String
+  | PUnorderedList Char Bool [[Partial]]
   | PUnorderedListItem Char String
-  -- | POrderedListItem Int Char [Partial]
-  -- | PUnorderedListItem Char [Partial]
-  | POrderedList Int Char Bool [Markdown]
-  | PUnorderedList Char Bool [Markdown]
   | PBlockQuote [Partial]
+  | PBlockQuoteItem String
   | PCodeBlock String String
   | PHorizontalRule
   | PParagraph String

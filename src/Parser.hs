@@ -2,87 +2,87 @@ module Parser where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.State
 import Data.Char (isSpace)
 import Data.List (isPrefixOf)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 
-import Text.Parsec hiding (many, optional, (<|>))
--- import Text.Parsec.String (Parser)
+import Text.Parsec hiding (many, optional, (<|>), State)
+import Text.Parsec.String (Parser)
 
 import AST
 import ParserCombinators
 import InlineParsers (runInlineP)
 
--- parseMarkdown input = case parse (many atxHeading) "" input of
---                         Left  _  -> []
---                         Right md -> md
-
 --------------------------------  BIG PARSERS  --------------------------------
 
--- markdownP :: Parser [Markdown]
--- markdownP = do writer <- blockP
---                let (partialAst, linkRefs) = runWriter writer
---                return []
-
--- once we have list of partials, need to go through and group runs of
--- blockquotes, list items.
-
-type UserState = Map String String
-type BlockParser = Parsec String UserState
+type LinkRefMap = Map String String
 
 runMainP :: String -> [Markdown]
-runMainP s = case runParser (connector <$> blockP) Map.empty "" (newlineTerminate s) of
-               Left  _ -> []
-               Right x -> x
+runMainP s = uncurry connector $ runState (runBlockP $ newlineTerminate s) Map.empty
 
-runBlockP :: String -> UserState -> ([Partial], UserState)
-runBlockP s u = case runParser wrapBlockP u "" s of
-                  Left  _ -> ([], Map.empty)
-                  Right x -> x
-  where wrapBlockP = do blocks <- blockP
-                        st <- getState
-                        return (blocks, st)
+runBlockP :: String -> State LinkRefMap [Partial]
+runBlockP s = case parse blockP "" s of
+                Left  _ -> return []
+                Right x -> combiner x
 
-combiner :: [Partial] -> ([Partial], Map String String)
-combiner = undefined
+combiner :: [Partial] -> State LinkRefMap [Partial]
 
+combiner (PUnorderedListItem c x : rest) = do
+  x' <- runBlockP x
+  combiner $ PUnorderedList c True [x'] : rest
+combiner (PUnorderedList c tight xs : PUnorderedListItem c' x : rest)
+  | c == c' = do
+      x' <- runBlockP x
+      combiner $ PUnorderedList c tight (xs ++ [x']) : rest
+combiner (PUnorderedList c _ xs : PBlankLine : rest@(PUnorderedListItem c' _ : _))
+  | c == c' = combiner $ PUnorderedList c False xs : rest
+combiner (ul@PUnorderedList{} : PBlankLine : rest) = combiner $ ul : rest
 
-connector :: [Partial] -> [Markdown]
+combiner (POrderedListItem n c x : rest) = do
+  x' <- runBlockP x
+  combiner $ POrderedList n c True [x'] : rest
+combiner (POrderedList n c tight xs : POrderedListItem _ c' x : rest)
+  | c == c' = do x' <- runBlockP x
+                 combiner $ POrderedList n c tight (xs ++ [x']) : rest
+combiner (POrderedList n c _ xs : PBlankLine : rest@(POrderedListItem _ c' _ : _))
+  | c == c' = combiner $ POrderedList n c False xs : rest
+combiner (ol@POrderedList{} : PBlankLine : rest) = combiner $ ol : rest
 
-connector (PUnorderedListItem c x : rest) =
-  connector $ PUnorderedList c True [Many $ runMainP x] : rest
-connector (PUnorderedList c tight xs : PUnorderedListItem c' x : rest)
-  | c == c' = connector $ PUnorderedList c tight (xs ++ [Many $ runMainP x]) : rest
-connector (PUnorderedList c _ xs : PBlankLine : rest@(PUnorderedListItem c' _ : _))
-  | c == c' = connector $ PUnorderedList c False xs : rest
-connector (ul@PUnorderedList{} : PBlankLine : rest) = connector $ ul : rest
-connector (PUnorderedList _ tight xs : rest) =
-  UnorderedList tight xs : connector rest
+combiner (PBlockQuoteItem x : PBlockQuoteItem y : rest) = combiner $ PBlockQuoteItem (x ++ y) : rest
+combiner (PBlockQuoteItem x : rest) = do x' <- runBlockP x
+                                         rest' <- combiner rest
+                                         return $ PBlockQuote x' : rest'
 
-connector (POrderedListItem n c x : rest) =
-  connector $ POrderedList n c True [Many $ runMainP x] : rest
-connector (POrderedList n c tight xs : POrderedListItem _ c' x : rest)
-  | c == c' = connector $ POrderedList n c tight (xs ++ [Many $ runMainP x]) : rest
-connector (POrderedList n c _ xs : PBlankLine : rest@(POrderedListItem _ c' _ : _))
-  | c == c' = connector $ POrderedList n c False xs : rest
-connector (ol@POrderedList{} : PBlankLine : rest) = connector $ ol : rest
-connector (POrderedList n _ tight xs : rest) =
-  OrderedList n tight xs : connector rest
+combiner (PLinkRef ref dest : rest) = do
+  modify $ Map.insertWith (flip const) ref dest
+  combiner rest
 
-connector (PBlockQuote xs : PBlockQuote ys : rest) = connector $ PBlockQuote (xs ++ ys) : rest
-connector (PBlockQuote xs : rest) = BlockQuote (Many $ connector xs) : connector rest
+combiner (x : xs) = do xs' <- combiner xs
+                       return $ x : xs'
+combiner [] = return []
 
-connector (PHeader level s : rest) = Header level (Many $ runInlineP s) : connector rest
-connector (PHorizontalRule : rest) = HorizontalRule : connector rest
-connector (PCodeBlock maybeInfo s : rest) = CodeBlock maybeInfo s : connector rest
-connector (PParagraph s : rest) = Paragraph (Many $ runInlineP $ trim s) : connector rest
-connector (PBlankLine : rest) = connector rest
-connector (PLinkRef : rest) = connector rest
-connector [] = []
+connector :: [Partial] -> LinkRefMap -> [Markdown]
+connector (PUnorderedList _ tight xs : rest) m =
+  UnorderedList tight ((Many . (`connector` m)) <$> xs) : connector rest m
+connector (POrderedList n _ tight xs : rest) m =
+  OrderedList n tight ((Many . (`connector` m)) <$> xs) : connector rest m
+connector (PBlockQuote xs : rest) m =
+  BlockQuote (Many $ connector xs m) : connector rest m
+connector (PHeader level s : rest) m =
+  Header level (Many $ runInlineP s m) : connector rest m
+connector (PHorizontalRule : rest) m =
+  HorizontalRule : connector rest m
+connector (PCodeBlock maybeInfo s : rest) m =
+  CodeBlock maybeInfo s : connector rest m
+connector (PParagraph s : rest) m =
+  Paragraph (Many $ runInlineP (trim s) m) : connector rest m
+connector (_ : rest) m = connector rest m
+connector [] _ = []
 
-blockP :: BlockParser [Partial]
+blockP :: Parser [Partial]
 blockP = manyTill (choice $ try <$> [ thematicBreak
                                     , unorderedListItem
                                     , orderedListItem
@@ -95,18 +95,9 @@ blockP = manyTill (choice $ try <$> [ thematicBreak
 
 ----------------------------  BLOCK LEVEL PARSERS  ----------------------------
 
--- the Monoid instance for Map is a left biased union. CommonMark respects the
--- first occurence of a ref
-
--- type LinkRefMap = Map String (String, Maybe String)
--- type BlockLevel = Writer LinkRefMap Partial
---
--- emptyWriter :: Ord k => a -> Writer (Map k v) a
--- emptyWriter = writer . (\p -> (p, Map.empty))
-
-thematicBreak, atxHeading,      setextHeading     :: BlockParser Partial
-indentedCode,  fencedCode,      paragraph         :: BlockParser Partial
-blockquote,    orderedListItem, unorderedListItem :: BlockParser Partial
+thematicBreak, atxHeading,      setextHeading     :: Parser Partial
+indentedCode,  fencedCode,      paragraph         :: Parser Partial
+blockquote,    orderedListItem, unorderedListItem :: Parser Partial
 
 thematicBreak = lineStart *> thematicMarker *> pure PHorizontalRule
 
@@ -140,16 +131,7 @@ fencedCode = do
 
 paragraph = PParagraph <$> (lineStart *> continuation 3)
 
-blockquote = do
-  _ <- lineStart
-  blockquoteMarker
-  content <- continuation 3
-  st <- getState
-  let (partials, st') = runBlockP content st
-  putState st'
-  return $ PBlockQuote partials
-
-  -- (PBlockQuote . runBlockP) <$> (lineStart *> blockquoteMarker *> continuation 3)
+blockquote = PBlockQuoteItem <$> (lineStart *> blockquoteMarker *> continuation 3)
 
 orderedListItem = do n <- lineStart
                      (index, delim) <- orderedListMarker
@@ -163,7 +145,7 @@ unorderedListItem = do n <- lineStart
                        content <- listItemContent $ n + m
                        return $ PUnorderedListItem delim content
 
-linkRef :: BlockParser Partial
+linkRef :: Parser Partial
 linkRef = do
   _ <- lineStart
   l <- linkLabel
@@ -171,27 +153,14 @@ linkRef = do
   _ <- spacesAround (optional eol)
   d <- linkDestination
   _ <- blankLine -- <* spacesAround (optional eol)
-  modifyState $ Map.insertWith (flip const) l d
-  return PLinkRef
+  return $ PLinkRef l d
 
 linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> fail "TODO" -- TODO figure out what they mean by matching parens
 linkTitle = undefined
 
-----------------------------  INLINE LEVEL PARSERS  ---------------------------
-
--- code, italics, bold, link, image, autolink, text :: Parser Markdown
---
--- code = undefined
--- italics = undefined
--- bold = undefined
--- link = undefined
--- image = undefined
--- autolink = undefined
--- text = undefined
-
 ----------------------------------- MARKERS -----------------------------------
 
-interruptMarkers :: BlockParser ()
+interruptMarkers :: Parser ()
 interruptMarkers = choice $ (try . lookAhead) <$>
   [ void thematicMarker
   , void atxMarker
@@ -202,38 +171,38 @@ interruptMarkers = choice $ (try . lookAhead) <$>
   , void blankLine
   ]
 
-thematicMarker :: BlockParser String
+thematicMarker :: Parser String
 thematicMarker = choice (atLeast 3 . breakChar <$> "*-_") <* eol <?> "thematic break"
   where breakChar c = char c <* many spaceChar
 
-atxMarker :: BlockParser Int
+atxMarker :: Parser Int
 atxMarker = repeatBetweenN 1 6 (char '#') <?> "ATX heading"
 
-fenceMarker :: BlockParser String
+fenceMarker :: Parser String
 fenceMarker = choice (atLeast 3 . char <$> "`~") <?> "fenced code block"
 
-orderedListMarker :: BlockParser (String, Char)
+orderedListMarker :: Parser (String, Char)
 orderedListMarker = liftA2 (,) (repeatBetween 1 9 digit) (choice $ char <$> ".)") <?> "ordered list"
 
-unorderedListMarker :: BlockParser Char
+unorderedListMarker :: Parser Char
 unorderedListMarker = choice (char <$> "-+*") <?> "unordered list"
 
-blockquoteMarker :: BlockParser ()
+blockquoteMarker :: Parser ()
 blockquoteMarker = (char '>' *> optional (char ' ') *> return ()) <?> "blockquote"
 
-setextMarker :: BlockParser Int
+setextMarker :: Parser Int
 setextMarker = (1 <$ some (char '=') <|> 2 <$ some (char '-')) <* eol
 
 -------------------------------  HELPER PARSERS  ------------------------------
 
-backtickString :: BlockParser String
+backtickString :: Parser String
 backtickString = some $ char '`'
 
-continuation :: Int -> BlockParser String
+continuation :: Int -> Parser String
 continuation w = manyTillEnd anyChar $ try stop <|> "" <$ eof
   where stop = eol <* atMost w spaceChar <* interruptMarkers
 
-listItemContent :: Int -> BlockParser String
+listItemContent :: Int -> Parser String
 listItemContent w = do first <- continuation w
                        rest <- many $ try $ liftA2 (\xs x -> concat $ xs ++ [x])
                                  (some $ try blankLine)
@@ -243,20 +212,20 @@ listItemContent w = do first <- continuation w
 
 ----------------------------  DEFINITIONAL PARSERS  ---------------------------
 
-line :: BlockParser String
+line :: Parser String
 line = manyTillEnd anyChar eol
 
-blankLine :: BlockParser String
+blankLine :: Parser String
 blankLine = manyTillEnd (oneOf " \t\v") eol
 
-nonWhiteSpaceChar :: BlockParser Char
+nonWhiteSpaceChar :: Parser Char
 nonWhiteSpaceChar = satisfy (not . isSpace)
 
-lineStart :: BlockParser Int
+lineStart :: Parser Int
 lineStart = length <$> atMost 3 spaceChar
 
 -- TODO deal with escaped brackets here
-linkLabel :: BlockParser String
+linkLabel :: Parser String
 linkLabel = between (char '[') (char ']') contentP
   where contentP = do ref <- repeatBetween 1 999 (noneOf "[]")
                       if all isSpace ref

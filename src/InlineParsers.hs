@@ -3,6 +3,7 @@ module InlineParsers where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
+import Data.Map (Map)
 import Data.Maybe (isJust)
 
 import Text.Parsec hiding (many, optional, (<|>))
@@ -403,15 +404,17 @@ preBlock = undefined
 -- | Create a Markdown AST from the input string. Errors if the string can't be
 --   fully consumed to create valid Markdown.
 
-runInlineP :: String -> [Markdown]
-runInlineP s = case parseOut of
-                 (Right result) -> result
-                 (Left err)     -> error $ show err
+-- TODO replace with LinkRefMap
+runInlineP :: String -> Map String String -> [Markdown]
+runInlineP s m = case parseOut of
+                   Right result -> result
+                   Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-                      runParser inlineMarkdown () "" $ runEscapes tok
+                      parse inlineMarkdown "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
+
 italics :: TokenParser Markdown
 italics = undefined
 
