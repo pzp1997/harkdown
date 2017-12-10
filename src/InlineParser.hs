@@ -12,7 +12,7 @@ import ParserCombinators
 
 -- Imports for tests only
 import Test.HUnit
-import qualified Data.Map.Strict as Map
+import qualified Data.Map as Map
 
 -- Initial pass tokenization ------------
 
@@ -149,11 +149,11 @@ mdTillDelim :: Bool -> (String, Bool) -> TokenParser [Markdown]
 mdTillDelim isStartOfDelimited (delim, prevJustClosed) =
   simplify <$>
     -- First see if end has been reached.
-    (try (pure . Text <$> rightFlankingDelim delim prevJustClosed)) <|>
+    try (pure . Text <$> rightFlankingDelim delim prevJustClosed) <|>
     -- Inline content
-    (try (liftA2 (++)
+    try (liftA2 (++)
       (inlineMarkdown isStartOfDelimited)
-      (mdTillDelim False (delim, True)))) <|>
+      (mdTillDelim False (delim, True))) <|>
     -- Consume another token as text and recurse
     if prevJustClosed
       then -- Try the same, but allow the right flanking delim to consume an
@@ -266,7 +266,7 @@ rightFlankingDelim delim justFinishedPrev =
 inlineMarkdown :: Bool -> TokenParser [Markdown]
 inlineMarkdown isStartOfDelimited = choice
   [ pure <$> inlineLink
-  --, refLink
+  , pure <$> refLink
   , emOrStrong isStartOfDelimited
   , pure <$> text
   ]
@@ -364,16 +364,21 @@ runInlineP s m = case parseOut of
 code :: TokenParser Markdown
 code = undefined
 
-italics :: TokenParser Markdown
-italics = undefined
-
 refLink :: TokenParser Markdown
-refLink = undefined
+refLink = do
+  linkContent <- concat <$> manyBetween
+    (punctParserS "[")
+    (punctParserS "]")
+    anyTextString
+  linksMap <- getState
+  case Map.lookup linkContent linksMap of
+    Nothing  -> parserFail "Not a known link"
+    Just ref -> return $ Link ref Nothing (Text linkContent)
 
 inlineLink :: TokenParser Markdown
 inlineLink = do
   -- There are many more rules for link text, but as a first pass anything goes
-  linkText <- liftA Many $ manyBetween
+  linkText <- Many <$> manyBetween
     (punctParserS "[")
     (try $ punctParserS "]")
     text
@@ -389,9 +394,9 @@ inlineLink = do
     (concat <$> manyTill
       anyTextString
       (lookAhead $ punctParserS ")" <|> whitespaceParser)) <*>
-    option Nothing (try title)
-  title :: TokenParser (Maybe String)
-  title = whitespaceParser *>
+    option Nothing (try titleP)
+  titleP :: TokenParser (Maybe String)
+  titleP = whitespaceParser *>
     ((Just . concat) <$>
       choice
         [ someBetween (punctParserS "'") (punctParserS "'") anyTextString
