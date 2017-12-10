@@ -419,7 +419,23 @@ italics :: TokenParser Markdown
 italics = undefined
 
 link :: TokenParser Markdown
-link = undefined
+link = do
+  -- There are many more rules for link text, but as a first pass anything goes
+  linkText <- liftA Many $ (punctParserS "[") *>
+                           manyTill (text) (try $ punctParserS "]")
+  -- Not supporting surrounding destinations in <>.
+  (dest, title) <- punctParserS "(" *> destTitle <* punctParserS ")"
+  return $ Link dest title linkText
+  where
+  destTitle :: TokenParser (String, Maybe String)
+  destTitle = (,) <$>
+    (foldr (++) [] <$> manyTill
+      anyTextString
+      (lookAhead $ punctParserS ")" <|> whitespaceParser)) <*>
+    option Nothing (try title)
+  title :: TokenParser (Maybe String)
+  title = (Just . foldr (++) []) <$>
+      (whitespaceParser *> manyTill anyTextString (lookAhead $ punctParserS ")"))
 
 image :: TokenParser Markdown
 image = undefined
