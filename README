@@ -9,6 +9,7 @@ Jeremy Lautman
 ## Goals
 1) Create a feature complete Markdown parser based on the CommonMark standard in Haskell
 2) Contribute to the CommonMark standard
+3) Learn how to design applications in Haskell
 
 ## Most significant challenge
 The CommonMark standard is immense, and is intended to be writer friendly rather than parser friendly. As such, parsing inline elements requires handling a large number of ambiguous edge cases. In addition, control sequence patterns in the text were often defined including lookbehind, which is not supported by the Parsec parser. To honor those requirements we had to design in a substantial amount of additional lookahead and parser parameterization.
