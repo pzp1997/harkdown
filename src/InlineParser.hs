@@ -99,14 +99,6 @@ simplify (x : xs)
 simplify []
   = []
 
--- | Utility that simplifies markdown items
-simplifyItem :: Markdown -> Markdown
-simplifyItem (Italics md)          = Italics (simplifyItem md)
-simplifyItem (Bold md)             = Bold (simplifyItem md)
-simplifyItem (Many [x])            = simplifyItem x
-simplifyItem (Many l)              = Many (simplify l)
-simplifyItem (Link ref title body) = Link ref title (simplifyItem body)
-
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
 --   character and using the supplied parser to recognize the delimiter. It
