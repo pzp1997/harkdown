@@ -94,6 +94,10 @@ simplify (Link ref title body:xs)
   = case simplify [body] of
     [x] -> Link ref title x : simplify xs
     l   -> Link ref title (Many l) : simplify xs
+simplify (Image ref title body:xs)
+  = case simplify [body] of
+    [x] -> Image ref title x : simplify xs
+    l   -> Image ref title (Many l) : simplify xs
 simplify (x : xs)
   = x : simplify xs
 simplify []
@@ -241,6 +245,23 @@ trunInlineP = TestList
   -- Full Ref links
   , formTest (Map.singleton "hello" "/url") "[text][hello]"
       [Link "/url" Nothing $ Text "text"]
+  -- Images, with inline, ref, and full ref links
+  , formTest Map.empty "![hello](/world)"
+      [Image "/world" Nothing $ Text "hello"]
+  , formTest Map.empty "![hello](/world )"
+      [Image "/world" Nothing $ Text "hello"]
+  , formTest Map.empty "![hello](/world (foo))"
+      [Image "/world" (Just "foo") $ Text "hello"]
+  , formTest Map.empty "![hello](/world 'foo')"
+      [Image "/world" (Just "foo") $ Text "hello"]
+  , formTest Map.empty "![hello](/world \"foo\")"
+      [Image "/world" (Just "foo") $ Text "hello"]
+  , formTest (Map.singleton "hello" "/url") "![hello]"
+      [Image "/url" Nothing $ Text "hello"]
+  , formTest (Map.singleton "hello" "/url") "![text][hello]"
+      [Image "/url" Nothing $ Text "text"]
+  , formTest Map.empty "!something"
+      [Text "!something"]
   ]
   where
   formTest linkMap testString expected =
@@ -285,7 +306,8 @@ rightFlankingDelim delim justFinishedPrev =
 -- | Top level token parser for any kind of Markdown. Doesn't match text so should match separately.
 inlineMarkdown :: Bool -> TokenParser [Markdown]
 inlineMarkdown isStartOfDelimited = simplify <$> choice
-  [ pure <$> try inlineLink
+  [ pure <$> try image
+  , pure <$> try inlineLink
   , pure <$> try fullRefLink
   , pure <$> try refLink
   , try $ emOrStrong isStartOfDelimited
@@ -379,7 +401,7 @@ runInlineP s m = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-                      runParser (concat <$> many (try (inlineMarkdown True) <|> pure <$> text)) m "" $ runEscapes tok
+                      runParser (simplify . concat <$> many (try (inlineMarkdown True) <|> pure <$> text)) m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
@@ -442,7 +464,12 @@ inlineLink = do
         ] <|> pure Nothing)
 
 image :: TokenParser Markdown
-image = undefined
+image = punctParserS "!" *> do
+  link <- choice [try fullRefLink, try refLink, try inlineLink]
+  case link of
+    Link ref title body -> return $ Image ref title body
+    _                   -> parserFail "Not a link"
+  
 
 autolink :: TokenParser Markdown
 autolink = undefined
