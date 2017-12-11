@@ -68,23 +68,44 @@ type TokenParser a = Parsec [MdToken] LinkRefMap a
 
 -- | Utility that merges all text fields
 simplify :: [Markdown] -> [Markdown]
-simplify (Many xs : Many ys : rest) = simplify $ Many (xs ++ ys) : rest
-simplify (Many [] : rest)           = simplify rest
-simplify (Many [md] : rest)         = simplify $ md : rest
-simplify (Many xs : rest)           = Many (simplify xs) : simplify rest
-simplify (Text s : Text t : rest)   = simplify $ Text (s ++ t) : rest
-simplify (Text "" : rest)           = simplify rest
-simplify (Italics md : xs)          = Italics (Many $ simplify [md]) : simplify xs
-simplify (Bold md : xs)             = Bold (Many $ simplify [md]) : simplify xs
-simplify (x : xs)                   = x : simplify xs
-simplify []                         = []
+simplify (Many xs : Many ys : rest)
+  = simplify $ Many (xs ++ ys) : rest
+simplify (Many [] : rest)
+  = simplify rest
+simplify (Many [md] : rest)
+  = simplify $ md : rest
+simplify (Many l : rest)
+  = case simplify l of
+    [] -> simplify rest
+    l  -> Many l : simplify rest
+simplify (Text s : Text t : rest)
+  = simplify $ Text (s ++ t) : rest
+simplify (Text "" : rest)
+  = simplify rest
+simplify (Italics md : xs)
+  = case simplify [md] of
+    [x] -> Italics x : simplify xs
+    l   -> Italics (Many l) : simplify xs
+simplify (Bold md : xs)
+  = case simplify [md] of
+    [x] -> Bold x : simplify xs
+    l   -> Bold (Many l) : simplify xs
+simplify (Link ref title body:xs)
+  = case simplify [body] of
+    [x] -> Link ref title x : simplify xs
+    l   -> Link ref title (Many l) : simplify xs
+simplify (x : xs)
+  = x : simplify xs
+simplify []
+  = []
 
-
--- TODO add type
--- interrupt = choice
---   [ pure <$> (whitespaceParser <|> punctParserN "*") <* lookAhead (some (punctParserS "*") *> betterNotFollowedBy whitespaceParser)
---   , "" <$ lookAhead (some (punctParserS "*") *> betterNotFollowedBy (whitespaceParser <|> punctParser))
---   ]
+-- | Utility that simplifies markdown items
+simplifyItem :: Markdown -> Markdown
+simplifyItem (Italics md)          = Italics (simplifyItem md)
+simplifyItem (Bold md)             = Bold (simplifyItem md)
+simplifyItem (Many [x])            = simplifyItem x
+simplifyItem (Many l)              = Many (simplify l)
+simplifyItem (Link ref title body) = Link ref title (simplifyItem body)
 
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
@@ -196,35 +217,38 @@ emOrStrong isStartOfDelimited = consumeInlineContent <$> do
 trunInlineP :: Test
 trunInlineP = TestList
   [ formTest Map.empty "*hello world*"
-      [Italics $ Many [Text "hello world"]]
+      [Italics $ Text "hello world"]
   , formTest Map.empty "**hello world**"
-      [Bold $ Many [Text "hello world"]]
+      [Bold $ Text "hello world"]
   , formTest Map.empty "***hello world***"
-      [Italics $ Many [Bold $ Many [Text "hello world"]]]
+      [Italics $ Bold (Text "hello world")]
   , formTest Map.empty "***hello* world**"
-      [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
+      [Bold $ Many [Italics $ Text "hello", Text " world"]]
   , formTest Map.empty "***hello** world*"
-      [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
+      [Italics $ Many [Bold $ Text "hello", Text " world"]]
 -- TODO disagreement. The js dingus says this next one should be
 -- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
   , formTest Map.empty "***hello **world*"
-      [Italics $ Many [Text "**hello **world"]]
+      [Italics $ Text "**hello **world"]
   , formTest Map.empty "**hello** **world**"
-      [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
+      [Bold $ Text "hello", Text " ",Bold $ Text "world"]
   -- Inline Links
   , formTest Map.empty "[hello](/world)"
-      [Link "/world" Nothing $ Many [Text "hello"]]
+      [Link "/world" Nothing $ Text "hello"]
   , formTest Map.empty "[hello](/world )"
-      [Link "/world" Nothing $ Many [Text "hello"]]
+      [Link "/world" Nothing $ Text "hello"]
   , formTest Map.empty "[hello](/world (foo))"
-      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+      [Link "/world" (Just "foo") $ Text "hello"]
   , formTest Map.empty "[hello](/world 'foo')"
-      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+      [Link "/world" (Just "foo") $ Text "hello"]
   , formTest Map.empty "[hello](/world \"foo\")"
-      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+      [Link "/world" (Just "foo") $ Text "hello"]
   -- Ref links
   , formTest (Map.singleton "hello" "/url") "[hello]"
       [Link "/url" Nothing $ Text "hello"]
+  -- Full Ref links
+  , formTest (Map.singleton "hello" "/url") "[text][hello]"
+      [Link "/url" Nothing $ Text "text"]
   ]
   where
   formTest linkMap testString expected =
@@ -268,8 +292,9 @@ rightFlankingDelim delim justFinishedPrev =
 
 -- | Top level token parser for any kind of Markdown. Doesn't match text so should match separately.
 inlineMarkdown :: Bool -> TokenParser [Markdown]
-inlineMarkdown isStartOfDelimited = choice
+inlineMarkdown isStartOfDelimited = simplify <$> choice
   [ pure <$> try inlineLink
+  , pure <$> try fullRefLink
   , pure <$> try refLink
   , try $ emOrStrong isStartOfDelimited
   ]
@@ -367,6 +392,23 @@ runInlineP s m = case parseOut of
 code :: TokenParser Markdown
 code = undefined
 
+-- | A link including link text like [linktext][linkref]
+fullRefLink :: TokenParser Markdown
+fullRefLink = do
+  linkContent <- Many . concat <$> manyBetween
+    (punctParserS "[")
+    (punctParserS "]")
+    (inlineMarkdown True <|> pure <$> text)
+  linkRef <- concat <$> manyBetween
+    (punctParserS "[")
+    (punctParserS "]")
+    anyTextString
+  linksMap <- getState
+  case Map.lookup linkRef linksMap of
+    Nothing  -> parserFail "Not a known link"
+    Just ref -> return $ Link ref Nothing linkContent
+
+-- | A link including just the linkref like [linkref]
 refLink :: TokenParser Markdown
 refLink = do
   linkContent <- concat <$> manyBetween
