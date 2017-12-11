@@ -362,7 +362,7 @@ runInlineP s m = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-    runParser (concat <$> many (inlineMarkdown True <|> pure <$> text)) m "" $ runEscapes tok
+                      runParser (concat <$> many (try (inlineMarkdown True) <|> pure <$> text)) m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
