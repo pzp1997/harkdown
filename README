@@ -1,0 +1,32 @@
+# Harkdown
+
+A CommonMark compliant Markdown parser written in Haskell using Parsec.
+
+## Team members
+Palmer Paul
+Jeremy Lautman
+
+## Goals
+1) Create a feature complete Markdown parser based on the CommonMark standard in Haskell
+2) Contribute to the CommonMark standard
+
+## Most significant challenge
+The CommonMark standard is immense, and is intended to be writer friendly rather than parser friendly. As such, parsing inline elements requires handling a large number of ambiguous edge cases. In addition, control sequence patterns in the text were often defined including lookbehind, which is not supported by the Parsec parser. To honor those requirements we had to design in a substantial amount of additional lookahead and parser parameterization.
+
+## Most impressive aspect of what was built
+TODO
+
+## Most interesting thing learned
+TODO
+
+## What resources were used in the project
+1) Cabal - build and dependency management system.
+2) Parsec - Monadic parser with support for parsing arbitrary token streams
+3) CommonMark Spec - An industry attempt at a harmonized standard between the various existing Markdown parsers.
+4) Aeson - JSON parsing support to load the supplied CommonMark test cases
+
+## What grade do we deserve and why?
+TODO
+
+## Other comments
+TODO
