@@ -471,7 +471,12 @@ autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (punctParserS "<") (pu
   protocol <- textString
   sep      <- punctParserS ":"
   content  <- concat <$> manyTill anyTextString (lookAhead . try $ punctParserS ">")
-  return $ protocol ++ ':' : content)
+  if validContent content
+    then return $ protocol ++ ':' : content
+    else fail "Invalid URI"
+  )
+  where
+    validContent = all $ \c -> not $ c == '<' || c == '>' || (isAscii c && (isControl c || isSpace c))
 {-
 autolinkEmail :: Parsec String () Markdown
 autolinkEmail = do
