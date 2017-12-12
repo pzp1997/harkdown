@@ -1,10 +1,22 @@
 module CMarkEquiv where
 
 import Control.Applicative
+import Data.Text (pack, unpack)
 
 import Test.QuickCheck
+import CMark (commonmarkToHtml)
 
 import AST
+import HtmlFormatter (renderHtml)
+import Parser (runMainP)
+
+cmarkTest :: Int -> IO ()
+cmarkTest n = quickCheckWith (stdArgs { maxSuccess = n }) prop_cmark
+
+prop_cmark :: [Markdown] -> Bool
+prop_cmark doc = renderHtml (runMainP md) == unpack (commonmarkToHtml [] $ pack md)
+  where md = show doc
+
 
 instance Arbitrary Markdown where
   arbitrary = -- Block level only
