@@ -232,10 +232,10 @@ trunInlineP = TestList
   , formTest Map.empty "[hello](/world \"foo\")"
       [Link "/world" (Just "foo") $ Text "hello"]
   -- Ref links
-  , formTest (Map.singleton "hello" "/url") "[hello]"
-      [Link "/url" Nothing $ Text "hello"]
+  , formTest (Map.singleton "hello" ("/url",Just "thing")) "[hello]"
+      [Link "/url" (Just "thing") $ Text "hello"]
   -- Full Ref links
-  , formTest (Map.singleton "hello" "/url") "[text][hello]"
+  , formTest (Map.singleton "hello" ("/url", Nothing)) "[text][hello]"
       [Link "/url" Nothing $ Text "text"]
   -- Images, with inline, ref, and full ref links
   , formTest Map.empty "![hello](/world)"
@@ -248,9 +248,9 @@ trunInlineP = TestList
       [Image "/world" (Just "foo") $ Text "hello"]
   , formTest Map.empty "![hello](/world \"foo\")"
       [Image "/world" (Just "foo") $ Text "hello"]
-  , formTest (Map.singleton "hello" "/url") "![hello]"
+  , formTest (Map.singleton "hello" ("/url", Nothing)) "![hello]"
       [Image "/url" Nothing $ Text "hello"]
-  , formTest (Map.singleton "hello" "/url") "![text][hello]"
+  , formTest (Map.singleton "hello" ("/url", Nothing)) "![text][hello]"
       [Image "/url" Nothing $ Text "text"]
   , formTest Map.empty "!something"
       [Text "!something"]
@@ -411,8 +411,8 @@ fullRefLink = do
     anyTextString
   linksMap <- getState
   case Map.lookup linkRef linksMap of
-    Nothing  -> parserFail "Not a known link"
-    Just ref -> return $ Link ref Nothing linkContent
+    Nothing           -> parserFail "Not a known link"
+    Just (ref, title) -> return $ Link ref title linkContent
 
 -- | A link including just the linkref like [linkref]
 refLink :: TokenParser Markdown
@@ -423,8 +423,8 @@ refLink = do
     anyTextString
   linksMap <- getState
   case Map.lookup linkContent linksMap of
-    Nothing  -> parserFail "Not a known link"
-    Just ref -> return $ Link ref Nothing (Text linkContent)
+    Nothing           -> parserFail "Not a known link"
+    Just (ref, title) -> return $ Link ref title (Text linkContent)
 
 inlineLink :: TokenParser Markdown
 inlineLink = do
@@ -471,19 +471,19 @@ autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (char '<') (char '>')
   where scheme = liftA2 (:) alpha (some $ alpha <|> digit <|> choice (char <$> "+.-"))
         alpha = satisfy (\c -> isAscii c && isAlpha c) <?> "ASCII letter"
         rest = satisfy $ \c -> not $ c == '<' || c == '>' || (isAscii c && (isControl c || isSpace c))
-
+{-
 autolinkEmail :: Parsec String () Markdown
 autolinkEmail = do
   email <- between (char '<') (char '>')
   if isJust $ matchRegex emailRegex email
     then return $ Link ("mailto:" ++ email) Nothing $ Text email
     else fail "valid email address"
-
-emailRegex :: Regex
+-}
+{-emailRegex :: Regex
 emailRegex = mkRegex $ "/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]" ++
                        "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9]" ++
                        "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/"
-
+-}
 -- | Parser that consumes any token as text. Should only be used after all
 --   other possibilities have been exhausted.
 --
