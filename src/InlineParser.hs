@@ -461,16 +461,13 @@ image = punctParserS "!" *> do
   case link of
     Link ref title body -> return $ Image ref title body
     _                   -> parserFail "Not a link"
-  
 
--- TODO change these around to work with Jeremy's stuff
-
-autolinkUri :: Parsec String () Markdown
-autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (char '<') (char '>')
-  (liftA3 (\a b c -> a ++ b : c) scheme (char ':') (many rest))
-  where scheme = liftA2 (:) alpha (some $ alpha <|> digit <|> choice (char <$> "+.-"))
-        alpha = satisfy (\c -> isAscii c && isAlpha c) <?> "ASCII letter"
-        rest = satisfy $ \c -> not $ c == '<' || c == '>' || (isAscii c && (isControl c || isSpace c))
+autolinkUri :: TokenParser Markdown
+autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (punctParserS "<") (punctParserS ">") (do
+  protocol <- textString
+  sep      <- punctParserS ":"
+  content  <- concat <$> manyTill anyTextString (lookAhead . try $ punctParserS ">")
+  return $ protocol ++ ':' : content)
 {-
 autolinkEmail :: Parsec String () Markdown
 autolinkEmail = do
