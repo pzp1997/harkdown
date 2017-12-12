@@ -1,7 +1,11 @@
+{-# LANGUAGE TupleSections #-}
+
 module InlineParser where
 
 import Control.Applicative
 import Control.Monad
+import Data.Char
+import Data.Either (fromRight)
 import Data.Maybe (isJust)
 
 import Text.Parsec hiding (many, optional, (<|>))
@@ -25,39 +29,30 @@ data MdToken
   deriving (Show, Eq)
 
 -- | Parser that parses the maximal span of whitespace characters
-pwhitespace :: Parser MdToken
-pwhitespace = Whitespace <$> oneOf "\t\f "
-
--- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
-plinebreak :: Parser MdToken
-plinebreak = eol *> pure NewLine
-
--- | Parser that parses a single punctuation character.
-ppunctuation :: Parser MdToken
-ppunctuation = Punctuation <$> punctuation
+whitespace :: Parser Char
+whitespace = oneOf "\t\f "
 
 -- | Consumes punctuation.
 punctuation :: Parser Char
--- All characters considered punctuation by Markdown.
 punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
 -- | Parser that parses the maximal span of characters that aren't whitespace
 --   or punctuation.
 pword :: Parser MdToken
 pword = Word <$> someTill anyChar
-  (lookAhead $ void (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
+  (lookAhead (void whitespace <|> void eol <|> void punctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
 tokenizer = many $ choice
-    [ ppunctuation
-    , plinebreak
-    , pwhitespace
+    [ Punctuation <$> punctuation
+    , NewLine <$ eol
+    , Whitespace <$> whitespace
     , pword
     ]
 
 -- | Runs the tokenizer on the provided input.
 tokenize :: String -> Either ParseError [MdToken]
-tokenize = runParser tokenizer () ""
+tokenize = parse tokenizer ""
 
 -----------------------------------------
 
@@ -118,8 +113,7 @@ leftFlankingDelimP startOfDelimited c delim =
   if startOfDelimited
     then
       -- Only need to verify that it isn't followed by whitespace
-      (,) <$> pure Nothing <*> delim <*
-        notFollowedBy (whitespaceParser <|> newLineParser)
+      (Nothing, ) <$> (delim <* notFollowedBy (whitespaceParser <|> newLineParser))
     else do
       -- Must check for full rules.
       pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
@@ -128,11 +122,9 @@ leftFlankingDelimP startOfDelimited c delim =
       notFollowedBy (whitespaceParser <|> newLineParser)
       if isJust pre
         -- (b) Preceded by whitespace or punctuation
-        then return (pre, s)
+        then pure (pre, s)
         -- (b) Not followed by punctuation
-        else do
-          notFollowedBy punctParser
-          return (pre, s)
+        else notFollowedBy punctParser *> pure (pre, s)
 -- | Left flanking delimiter of a specified length and char
 leftFlankingDelim :: Bool -> String -> TokenParser (Maybe Char, String)
 leftFlankingDelim startOfDelimited delim =
@@ -471,8 +463,26 @@ image = punctParserS "!" *> do
     _                   -> parserFail "Not a link"
   
 
-autolink :: TokenParser Markdown
-autolink = undefined
+-- TODO change these around to work with Jeremy's stuff
+
+autolinkUri :: Parsec String () Markdown
+autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (char '<') (char '>')
+  (liftA3 (\a b c -> a ++ b : c) scheme (char ':') (many rest))
+  where scheme = liftA2 (:) alpha (some $ alpha <|> digit <|> choice (char <$> "+.-"))
+        alpha = satisfy (\c -> isAscii c && isAlpha c) <?> "ASCII letter"
+        rest = satisfy $ \c -> not $ c == '<' || c == '>' || (isAscii c && (isControl c || isSpace c))
+
+autolinkEmail :: Parsec String () Markdown
+autolinkEmail = do
+  email <- between (char '<') (char '>')
+  if isJust $ matchRegex emailRegex email
+    then return $ Link ("mailto:" ++ email) Nothing $ Text email
+    else fail "valid email address"
+
+emailRegex :: Regex
+emailRegex = mkRegex $ "/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]" ++
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9]" ++
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/"
 
 -- | Parser that consumes any token as text. Should only be used after all
 --   other possibilities have been exhausted.
