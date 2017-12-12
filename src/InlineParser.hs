@@ -5,7 +5,6 @@ module InlineParser where
 import Control.Applicative
 import Control.Monad
 import Data.Char
-import Data.Either (fromRight)
 import Data.Maybe (isJust)
 
 import Text.Parsec hiding (many, optional, (<|>))
@@ -72,7 +71,7 @@ simplify (Many [md] : rest)
 simplify (Many l : rest)
   = case simplify l of
     [] -> simplify rest
-    l  -> Many l : simplify rest
+    l'  -> Many l' : simplify rest
 simplify (Text s : Text t : rest)
   = simplify $ Text (s ++ t) : rest
 simplify (Text "" : rest)
@@ -113,12 +112,10 @@ leftFlankingDelimP startOfDelimited c delim =
   if startOfDelimited
     then
       -- Only need to verify that it isn't followed by whitespace
-      (Nothing, ) <$>
-        (delim <* notFollowedBy (whitespaceParser <|> newLineParser))
+      (Nothing, ) <$> (delim <* notFollowedBy (whitespaceParser <|> newLineParser))
     else do
       -- Must check for full rules.
-      pre <- optionMaybe
-        (whitespaceParser <|> punctParserN [c] <|> newLineParser)
+      pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
       s <- delim -- delimiter
       -- (a) May not be followed by whitespace
       notFollowedBy (whitespaceParser <|> newLineParser)
@@ -127,7 +124,6 @@ leftFlankingDelimP startOfDelimited c delim =
         then pure (pre, s)
         -- (b) Not followed by punctuation
         else notFollowedBy punctParser *> pure (pre, s)
-
 -- | Left flanking delimiter of a specified length and char
 leftFlankingDelim :: Bool -> String -> TokenParser (Maybe Char, String)
 leftFlankingDelim startOfDelimited delim =
@@ -137,11 +133,18 @@ leftFlankingDelimAll :: Bool -> Char -> TokenParser (Maybe Char, String)
 leftFlankingDelimAll startOfDelimited c =
   leftFlankingDelimP startOfDelimited c (many1 $ punctParserS [c])
 
--- A left-flanking delimiter run is a delimiter run that is (a) not followed by
--- Unicode whitespace, and (b) not followed by a punctuation character, or
--- preceded by Unicode whitespace or a punctuation character. For purposes of
--- this definition, the beginning and the end of the line count as Unicode
--- whitespace.
+-- A left-flanking delimiter run is a delimiter run that is (a) not followed by Unicode whitespace, and (b) not followed by a punctuation character, or preceded by Unicode whitespace or a punctuation character. For purposes of this definition, the beginning and the end of the line count as Unicode whitespace.
+
+-- | Unit test
+tleftFlankingDelimP :: Test
+tleftFlankingDelimP = TestList
+  [ "*hello" ~:
+      runParser (leftFlankingDelim True "*") Map.empty "" [Punctuation '*',Word "hello"] ~?= Right (Nothing, "*")
+  , "Token remains" ~:
+      runParser (leftFlankingDelim True "*" *> text) Map.empty "" [Punctuation '*',Word "hello"] ~?= Right (Text "hello")
+  , "Leading whitespace" ~:
+      runParser (leftFlankingDelim False "*") Map.empty "" [Whitespace '\n',Punctuation '*',Word "hello"] ~?= Right (Just '\n', "*")
+  ]
 
 
 
@@ -175,8 +178,7 @@ mdTillDelim isStartOfDelimited (delim, prevJustClosed) =
 --   create the delimiter it isn't lost.
 emOrStrong :: Bool -> TokenParser [Markdown]
 emOrStrong isStartOfDelimited = consumeInlineContent <$> do
-  (_, maxdelim) <-
-    lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
+  (_, maxdelim) <- lookAhead (try $ leftFlankingDelimAll isStartOfDelimited '*')
   let emphasis = emphasisP "*"
       strongemphasis = emphasisP "**"
   if even (length maxdelim)
@@ -265,19 +267,20 @@ trunInlineP = TestList
 --   preceded by whitespace).
 --   The delimiter is parameterized by a boolean, denoting whether the previous
 --   delimiter just finished (so there won't be any tokens to consume)
+-- TODO make it take (String,Bool) instead of taking them separately
 rightFlankingDelim :: String -> Bool -> TokenParser String
 rightFlankingDelim delim justFinishedPrev =
   if justFinishedPrev
     then
     -- If we just finished a delimited section, it must have had a punctuation
-    -- character. Therefore we need only check that it is followed by
-    -- whitespace or punctuation.
+    -- character. Therefore we need only check that it is followed by whitespace
+    -- or punctuation.
       (do
         _ <- punctParserSeq delim
         notFollowedBy (whitespaceParser <|> newLineParser <|> punctParser)
         return "") <|> rightFlankingDelim delim False
     else do
-      -- General case
+      -- General case -- TODO fix
       notFollowedBy (whitespaceParser <|> newLineParser)
       mPunct <- optionMaybe (punctParserN delim)
       case mPunct of
@@ -291,13 +294,10 @@ rightFlankingDelim delim justFinishedPrev =
           -- preceded by punctuation p
           -- Must be followed by whitespace or punctuation
           _ <- punctParserSeq delim
-          eof <|>
-            void
-              (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
+          eof <|> void (lookAhead $ whitespaceParser <|> newLineParser <|> punctParser)
           return [p]
 
--- | Top level token parser for any kind of Markdown. Doesn't match text so
---   should match separately.
+-- | Top level token parser for any kind of Markdown. Doesn't match text so should match separately.
 inlineMarkdown :: Bool -> TokenParser [Markdown]
 inlineMarkdown isStartOfDelimited = simplify <$> choice
   [ pure <$> try image
@@ -339,10 +339,9 @@ punctParserN :: String -> TokenParser Char
 punctParserN except = tokenPrim show nextPos testMatch
   where
   nextPos   ps _ _ = incSourceColumn ps 1
-  testMatch t      =
-    case t of
-      Punctuation c -> if c `elem` except then Nothing else Just c
-      _             -> Nothing
+  testMatch t      = case t of
+                       Punctuation c -> if c `elem` except then Nothing else Just c
+                       _             -> Nothing
 
 -- | Consumes a block of whitespace, yielding the whitespace character
 --   encountered.
@@ -395,12 +394,9 @@ preBlock = undefined
 runInlineP :: String -> LinkRefMap -> [Markdown]
 runInlineP s m = case parseOut of
                    Right result -> result
-                   Left _       -> [Text s]
-  where parseOut = do
-        tok <- tokenize s
-        runParser (simplify . concat <$>
-          many (try (inlineMarkdown True) <|> pure <$> text))
-          m "" $ runEscapes tok
+                   Left _       -> [Text s] -- TODO is this the right move?
+  where parseOut = do tok <- tokenize s
+                      runParser (simplify . concat <$> many (try (inlineMarkdown True) <|> pure <$> text)) m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
@@ -470,26 +466,36 @@ image = punctParserS "!" *> do
     _                   -> parserFail "Not a link"
 
 autolinkUri :: TokenParser Markdown
-autolinkUri = (\s -> Link s Nothing $ Text s) <$>
-  between (punctParserS "<") (punctParserS ">") (do
-    protocol <- textString
-    sep      <- punctParserS ":"
-    content  <- concat <$>
-      manyTill anyTextString (lookAhead . try $ punctParserS ">")
-    if validContent content && validScheme protocol
-      then return $ protocol ++ ':' : content
-      else fail "Invalid URI"
-    )
+autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (punctParserS "<") (punctParserS ">") (do
+  protocol <- textString
+  _        <- punctParserS ":"
+  content  <- concat <$> manyTill anyTextString (lookAhead . try $ punctParserS ">")
+  if validContent content && validScheme protocol
+    then return $ protocol ++ ':' : content
+    else fail "Invalid URI"
+  )
   where
     validScheme (x : xs@(_ : _)) = alpha x && all restOkay xs
     validScheme _                = False
     alpha c                      = isAscii c && isAlpha c
     restOkay c = alpha c || isDigit c || c == '+' || c == '.' || c == '-'
-    validContent = all $ \c -> not $ c == '<' || c == '>' ||
-                                     (isAscii c && (isControl c || isSpace c))
-
+    validContent = all $ \c -> not $ c == '<' || c == '>' || (isAscii c && (isControl c || isSpace c))
+{-
+autolinkEmail :: Parsec String () Markdown
+autolinkEmail = do
+  email <- between (char '<') (char '>')
+  if isJust $ matchRegex emailRegex email
+    then return $ Link ("mailto:" ++ email) Nothing $ Text email
+    else fail "valid email address"
+-}
+{-emailRegex :: Regex
+emailRegex = mkRegex $ "/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]" ++
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9]" ++
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/"
+-}
 -- | Parser that consumes any token as text. Should only be used after all
 --   other possibilities have been exhausted.
+--
 text :: TokenParser Markdown
 text = Text <$> anyTextString
 
