@@ -81,15 +81,14 @@ unorderedListItem = do n <- lineStart
                        content <- listItemContent $ n + m
                        return $ PUnorderedListItem delim content
 
-linkRef = liftA2 PLinkRef
+linkRef = liftA3 PLinkRef
   (lineStart *> linkLabel)
-  (char ':' *> spacesAround (optional eol) *> linkDestination <* blankLine) -- <* spacesAround (optional eol)
+  (char ':' *> spacesAround (optional eol) *> linkDestination)
+  (Just <$> try (some spaceChar *> optional eol *> many spaceChar *> linkTitle <* blankLine)
+     <|> (Nothing <$ spacesAround (optional eol)))
 
 linkDestination :: Parser String
 linkDestination = between (char '<') (char '>') (many $ noneOf " \t\v\n\r<>") <|> many (satisfy $ \c -> not (isControl c || isSpace c))
-
-linkTitle :: Parser String
-linkTitle = undefined
 
 ----------------------------------- MARKERS -----------------------------------
 
@@ -180,8 +179,8 @@ combiner (PBlockQuoteItem x : rest) = do x' <- runBlockP x
                                          rest' <- combiner rest
                                          return $ PBlockQuote x' : rest'
 
-combiner (PLinkRef ref dest : rest) = do
-  modify $ M.insertWith (flip const) ref dest
+combiner (PLinkRef ref dest title : rest) = do
+  modify $ M.insertWith (flip const) ref (dest, title)
   combiner rest
 
 combiner (x : xs) = do xs' <- combiner xs
