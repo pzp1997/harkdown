@@ -237,6 +237,9 @@ trunInlineP = TestList
   -- Full Ref links
   , formTest (Map.singleton "hello" ("/url", Nothing)) "[text][hello]"
       [Link "/url" Nothing $ Text "text"]
+  -- Autolinks
+  , formTest Map.empty "<http://helloworld.com>"
+      [Link "http://helloworld.com" Nothing $ Text "http://helloworld.com"]
   -- Images, with inline, ref, and full ref links
   , formTest Map.empty "![hello](/world)"
       [Image "/world" Nothing $ Text "hello"]
@@ -303,6 +306,7 @@ inlineMarkdown isStartOfDelimited = simplify <$> choice
   , pure <$> try fullRefLink
   , pure <$> try refLink
   , try $ emOrStrong isStartOfDelimited
+  , pure <$> try autolinkUri
   ]
 
 -- Utilities for parsing individual types.
