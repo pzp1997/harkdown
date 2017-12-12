@@ -2,7 +2,7 @@ module Main where
 
 import Control.Monad (unless)
 import System.Environment (getArgs)
-import System.IO (IOMode (ReadMode), hClose, hGetContents, openFile)
+import System.IO
 
 import HtmlFormatter (renderHtml)
 import Parser (runMainP)
