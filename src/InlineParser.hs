@@ -1,7 +1,11 @@
+{-# LANGUAGE TupleSections #-}
+
 module InlineParser where
 
 import Control.Applicative
 import Control.Monad
+import Data.Char
+import Data.Either (fromRight)
 import Data.Maybe (isJust)
 
 import Text.Parsec hiding (many, optional, (<|>))
@@ -25,39 +29,30 @@ data MdToken
   deriving (Show, Eq)
 
 -- | Parser that parses the maximal span of whitespace characters
-pwhitespace :: Parser MdToken
-pwhitespace = Whitespace <$> oneOf "\t\f "
-
--- | Parses any form of a newline [\r, \r\n, \n] and returns a NewLine.
-plinebreak :: Parser MdToken
-plinebreak = eol *> pure NewLine
-
--- | Parser that parses a single punctuation character.
-ppunctuation :: Parser MdToken
-ppunctuation = Punctuation <$> punctuation
+whitespace :: Parser Char
+whitespace = oneOf "\t\f "
 
 -- | Consumes punctuation.
 punctuation :: Parser Char
--- All characters considered punctuation by Markdown.
 punctuation = oneOf "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 
 -- | Parser that parses the maximal span of characters that aren't whitespace
 --   or punctuation.
 pword :: Parser MdToken
 pword = Word <$> someTill anyChar
-  (lookAhead $ void (pwhitespace <|> plinebreak <|> ppunctuation) <|> eof)
+  (lookAhead (void whitespace <|> void eol <|> void punctuation) <|> eof)
 
 tokenizer :: Parser [MdToken]
 tokenizer = many $ choice
-    [ ppunctuation
-    , plinebreak
-    , pwhitespace
+    [ Punctuation <$> punctuation
+    , NewLine <$ eol
+    , Whitespace <$> whitespace
     , pword
     ]
 
 -- | Runs the tokenizer on the provided input.
 tokenize :: String -> Either ParseError [MdToken]
-tokenize = runParser tokenizer () ""
+tokenize = parse tokenizer ""
 
 -----------------------------------------
 
@@ -68,23 +63,40 @@ type TokenParser a = Parsec [MdToken] LinkRefMap a
 
 -- | Utility that merges all text fields
 simplify :: [Markdown] -> [Markdown]
-simplify (Many xs : Many ys : rest) = simplify $ Many (xs ++ ys) : rest
-simplify (Many [] : rest)           = simplify rest
-simplify (Many [md] : rest)         = simplify $ md : rest
-simplify (Many xs : rest)           = Many (simplify xs) : simplify rest
-simplify (Text s : Text t : rest)   = simplify $ Text (s ++ t) : rest
-simplify (Text "" : rest)           = simplify rest
-simplify (Italics md : xs)          = Italics (Many $ simplify [md]) : simplify xs
-simplify (Bold md : xs)             = Bold (Many $ simplify [md]) : simplify xs
-simplify (x : xs)                   = x : simplify xs
-simplify []                         = []
-
-
--- TODO add type
--- interrupt = choice
---   [ pure <$> (whitespaceParser <|> punctParserN "*") <* lookAhead (some (punctParserS "*") *> betterNotFollowedBy whitespaceParser)
---   , "" <$ lookAhead (some (punctParserS "*") *> betterNotFollowedBy (whitespaceParser <|> punctParser))
---   ]
+simplify (Many xs : Many ys : rest)
+  = simplify $ Many (xs ++ ys) : rest
+simplify (Many [] : rest)
+  = simplify rest
+simplify (Many [md] : rest)
+  = simplify $ md : rest
+simplify (Many l : rest)
+  = case simplify l of
+    [] -> simplify rest
+    l  -> Many l : simplify rest
+simplify (Text s : Text t : rest)
+  = simplify $ Text (s ++ t) : rest
+simplify (Text "" : rest)
+  = simplify rest
+simplify (Italics md : xs)
+  = case simplify [md] of
+    [x] -> Italics x : simplify xs
+    l   -> Italics (Many l) : simplify xs
+simplify (Bold md : xs)
+  = case simplify [md] of
+    [x] -> Bold x : simplify xs
+    l   -> Bold (Many l) : simplify xs
+simplify (Link ref title body:xs)
+  = case simplify [body] of
+    [x] -> Link ref title x : simplify xs
+    l   -> Link ref title (Many l) : simplify xs
+simplify (Image ref title body:xs)
+  = case simplify [body] of
+    [x] -> Image ref title x : simplify xs
+    l   -> Image ref title (Many l) : simplify xs
+simplify (x : xs)
+  = x : simplify xs
+simplify []
+  = []
 
 
 -- | Parser that recognizes a left flanking delimiter run of the supplied
@@ -101,8 +113,7 @@ leftFlankingDelimP startOfDelimited c delim =
   if startOfDelimited
     then
       -- Only need to verify that it isn't followed by whitespace
-      (,) <$> pure Nothing <*> delim <*
-        notFollowedBy (whitespaceParser <|> newLineParser)
+      (Nothing, ) <$> (delim <* notFollowedBy (whitespaceParser <|> newLineParser))
     else do
       -- Must check for full rules.
       pre <- optionMaybe (whitespaceParser <|> punctParserN [c] <|> newLineParser)
@@ -111,11 +122,9 @@ leftFlankingDelimP startOfDelimited c delim =
       notFollowedBy (whitespaceParser <|> newLineParser)
       if isJust pre
         -- (b) Preceded by whitespace or punctuation
-        then return (pre, s)
+        then pure (pre, s)
         -- (b) Not followed by punctuation
-        else do
-          notFollowedBy punctParser
-          return (pre, s)
+        else notFollowedBy punctParser *> pure (pre, s)
 -- | Left flanking delimiter of a specified length and char
 leftFlankingDelim :: Bool -> String -> TokenParser (Maybe Char, String)
 leftFlankingDelim startOfDelimited delim =
@@ -196,35 +205,58 @@ emOrStrong isStartOfDelimited = consumeInlineContent <$> do
 trunInlineP :: Test
 trunInlineP = TestList
   [ formTest Map.empty "*hello world*"
-      [Italics $ Many [Text "hello world"]]
+      [Italics $ Text "hello world"]
   , formTest Map.empty "**hello world**"
-      [Bold $ Many [Text "hello world"]]
+      [Bold $ Text "hello world"]
   , formTest Map.empty "***hello world***"
-      [Italics $ Many [Bold $ Many [Text "hello world"]]]
+      [Italics $ Bold (Text "hello world")]
   , formTest Map.empty "***hello* world**"
-      [Bold $ Many [Italics $ Many [Text "hello"], Text " world"]]
+      [Bold $ Many [Italics $ Text "hello", Text " world"]]
   , formTest Map.empty "***hello** world*"
-      [Italics $ Many [Bold $ Many [Text "hello"], Text " world"]]
+      [Italics $ Many [Bold $ Text "hello", Text " world"]]
 -- TODO disagreement. The js dingus says this next one should be
 -- ***hello *<em>world</em>, but I think it should be <em>**hello **world</em>.
   , formTest Map.empty "***hello **world*"
-      [Italics $ Many [Text "**hello **world"]]
+      [Italics $ Text "**hello **world"]
   , formTest Map.empty "**hello** **world**"
-      [Bold $ Many [Text "hello"], Text " ",Bold $ Many [Text "world"]]
+      [Bold $ Text "hello", Text " ",Bold $ Text "world"]
   -- Inline Links
   , formTest Map.empty "[hello](/world)"
-      [Link "/world" Nothing $ Many [Text "hello"]]
+      [Link "/world" Nothing $ Text "hello"]
   , formTest Map.empty "[hello](/world )"
-      [Link "/world" Nothing $ Many [Text "hello"]]
+      [Link "/world" Nothing $ Text "hello"]
   , formTest Map.empty "[hello](/world (foo))"
-      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+      [Link "/world" (Just "foo") $ Text "hello"]
   , formTest Map.empty "[hello](/world 'foo')"
-      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+      [Link "/world" (Just "foo") $ Text "hello"]
   , formTest Map.empty "[hello](/world \"foo\")"
-      [Link "/world" (Just "foo") $ Many [Text "hello"]]
+      [Link "/world" (Just "foo") $ Text "hello"]
   -- Ref links
-  , formTest (Map.singleton "hello" "/url") "[hello]"
-      [Link "/url" Nothing $ Text "hello"]
+  , formTest (Map.singleton "hello" ("/url",Just "thing")) "[hello]"
+      [Link "/url" (Just "thing") $ Text "hello"]
+  -- Full Ref links
+  , formTest (Map.singleton "hello" ("/url", Nothing)) "[text][hello]"
+      [Link "/url" Nothing $ Text "text"]
+  -- Autolinks
+  , formTest Map.empty "<http://helloworld.com>"
+      [Link "http://helloworld.com" Nothing $ Text "http://helloworld.com"]
+  -- Images, with inline, ref, and full ref links
+  , formTest Map.empty "![hello](/world)"
+      [Image "/world" Nothing $ Text "hello"]
+  , formTest Map.empty "![hello](/world )"
+      [Image "/world" Nothing $ Text "hello"]
+  , formTest Map.empty "![hello](/world (foo))"
+      [Image "/world" (Just "foo") $ Text "hello"]
+  , formTest Map.empty "![hello](/world 'foo')"
+      [Image "/world" (Just "foo") $ Text "hello"]
+  , formTest Map.empty "![hello](/world \"foo\")"
+      [Image "/world" (Just "foo") $ Text "hello"]
+  , formTest (Map.singleton "hello" ("/url", Nothing)) "![hello]"
+      [Image "/url" Nothing $ Text "hello"]
+  , formTest (Map.singleton "hello" ("/url", Nothing)) "![text][hello]"
+      [Image "/url" Nothing $ Text "text"]
+  , formTest Map.empty "!something"
+      [Text "!something"]
   ]
   where
   formTest linkMap testString expected =
@@ -268,10 +300,13 @@ rightFlankingDelim delim justFinishedPrev =
 
 -- | Top level token parser for any kind of Markdown. Doesn't match text so should match separately.
 inlineMarkdown :: Bool -> TokenParser [Markdown]
-inlineMarkdown isStartOfDelimited = choice
-  [ pure <$> try inlineLink
+inlineMarkdown isStartOfDelimited = simplify <$> choice
+  [ pure <$> try image
+  , pure <$> try inlineLink
+  , pure <$> try fullRefLink
   , pure <$> try refLink
   , try $ emOrStrong isStartOfDelimited
+  , pure <$> try autolinkUri
   ]
 
 -- Utilities for parsing individual types.
@@ -362,11 +397,28 @@ runInlineP s m = case parseOut of
                    Right result -> result
                    Left _       -> [Text s] -- TODO is this the right move?
   where parseOut = do tok <- tokenize s
-                      runParser (concat <$> many (try (inlineMarkdown True) <|> pure <$> text)) m "" $ runEscapes tok
+                      runParser (simplify . concat <$> many (try (inlineMarkdown True) <|> pure <$> text)) m "" $ runEscapes tok
 
 code :: TokenParser Markdown
 code = undefined
 
+-- | A link including link text like [linktext][linkref]
+fullRefLink :: TokenParser Markdown
+fullRefLink = do
+  linkContent <- Many . concat <$> manyBetween
+    (punctParserS "[")
+    (punctParserS "]")
+    (inlineMarkdown True <|> pure <$> text)
+  linkRef <- concat <$> manyBetween
+    (punctParserS "[")
+    (punctParserS "]")
+    anyTextString
+  linksMap <- getState
+  case Map.lookup linkRef linksMap of
+    Nothing           -> parserFail "Not a known link"
+    Just (ref, title) -> return $ Link ref title linkContent
+
+-- | A link including just the linkref like [linkref]
 refLink :: TokenParser Markdown
 refLink = do
   linkContent <- concat <$> manyBetween
@@ -375,8 +427,8 @@ refLink = do
     anyTextString
   linksMap <- getState
   case Map.lookup linkContent linksMap of
-    Nothing  -> parserFail "Not a known link"
-    Just ref -> return $ Link ref Nothing (Text linkContent)
+    Nothing           -> parserFail "Not a known link"
+    Just (ref, title) -> return $ Link ref title (Text linkContent)
 
 inlineLink :: TokenParser Markdown
 inlineLink = do
@@ -408,11 +460,40 @@ inlineLink = do
         ] <|> pure Nothing)
 
 image :: TokenParser Markdown
-image = undefined
+image = punctParserS "!" *> do
+  link <- choice [try fullRefLink, try refLink, try inlineLink]
+  case link of
+    Link ref title body -> return $ Image ref title body
+    _                   -> parserFail "Not a link"
 
-autolink :: TokenParser Markdown
-autolink = undefined
-
+autolinkUri :: TokenParser Markdown
+autolinkUri = (\s -> Link s Nothing $ Text s) <$> between (punctParserS "<") (punctParserS ">") (do
+  protocol <- textString
+  sep      <- punctParserS ":"
+  content  <- concat <$> manyTill anyTextString (lookAhead . try $ punctParserS ">")
+  if validContent content && validScheme protocol
+    then return $ protocol ++ ':' : content
+    else fail "Invalid URI"
+  )
+  where
+    validScheme (x : xs@(_ : _)) = alpha x && all restOkay xs
+    validScheme _                = False
+    alpha c                      = isAscii c && isAlpha c
+    restOkay c = alpha c || isDigit c || c == '+' || c == '.' || c == '-'
+    validContent = all $ \c -> not $ c == '<' || c == '>' || (isAscii c && (isControl c || isSpace c))
+{-
+autolinkEmail :: Parsec String () Markdown
+autolinkEmail = do
+  email <- between (char '<') (char '>')
+  if isJust $ matchRegex emailRegex email
+    then return $ Link ("mailto:" ++ email) Nothing $ Text email
+    else fail "valid email address"
+-}
+{-emailRegex :: Regex
+emailRegex = mkRegex $ "/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]" ++
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9]" ++
+                       "(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/"
+-}
 -- | Parser that consumes any token as text. Should only be used after all
 --   other possibilities have been exhausted.
 --

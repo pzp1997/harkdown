@@ -19,6 +19,11 @@ linkLabel = between (char '[') (char ']') contentP
                         then fail "valid link ref"
                         else return (condenseSpace ref)
 
+linkTitle :: Parsec String u String
+linkTitle =   between (char '"') (char '"') (many $ noneOf "\"")
+          <|> between (char '\'') (char '\'') (many $ noneOf "'")
+          <|> between (char '(') (char ')') (many $ noneOf ")")
+
 eol :: Parsec String u String
 eol =   string "\n"
     <|> liftA2 (++) (string "\r") (string "\n" <|> string "")

@@ -33,7 +33,7 @@ data Partial
   | PHorizontalRule
   | PParagraph String
   | PBlankLine
-  | PLinkRef String String
+  | PLinkRef String String (Maybe String)
   deriving (Eq, Show)
 
-type LinkRefMap = Map String String
+type LinkRefMap = Map String (String, Maybe String)
